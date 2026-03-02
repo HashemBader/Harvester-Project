@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from utils.isbn_validator import normalize_isbn
 
 from .icons import get_icon, SVG_HARVEST, SVG_INPUT, SVG_ACTIVITY
-# from .harvest_tab import HarvestWorker  # REMOVED: Using internal HarvestWorkerV2 for separation
+from .input_tab import ClickableDropZone
 
 # Add imports for Worker
 from PyQt6.QtCore import QThread
@@ -577,7 +577,7 @@ class HarvestTabV2(QWidget):
         self.drop_zone = ClickableDropZone()
         self.drop_zone.setObjectName("DropZone")  # For styling
         self.drop_zone.clicked.connect(self._browse_file)  # Connect click to browse
-        self.drop_zone.file_dropped.connect(self.set_input_file)  # Connect drop to handler
+        self.drop_zone.fileDropped.connect(self.set_input_file)  # Connect drop to handler
 
         drop_layout = QVBoxLayout()
         drop_icon = QLabel("📁")
@@ -836,7 +836,7 @@ class HarvestTabV2(QWidget):
         self.log_output = QLabel("Ready...")
         self.log_output.setProperty("class", "CardHelper")
         self.log_output.setAccessibleName("Harvest status message")
-        stats_layout.addWidget(self.log_output)
+        status_layout.addWidget(self.log_output)
         self.btn_stop = QPushButton("Cancel")
         self.btn_stop.setProperty("class", "DangerButton")
         self.btn_stop.setMinimumHeight(40)
