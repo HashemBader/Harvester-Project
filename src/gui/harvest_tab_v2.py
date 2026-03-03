@@ -17,6 +17,8 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QFileDialog,
     QLineEdit,
+    QScrollArea,
+    QSizePolicy,
 )
 from datetime import datetime, timedelta, timezone
 from PyQt6.QtCore import Qt, QTimer, QTime, pyqtSignal, QSize, QThread
