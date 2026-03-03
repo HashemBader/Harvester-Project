@@ -477,7 +477,8 @@ class HarvestWorkerV2(QThread):
                         "last_attempted=excluded.last_attempted, fail_count=fail_count+1, last_error='Invalid ISBN'",
                         (raw_isbn[:20], "Validation", datetime.now().isoformat()),
                     )
-        except Exception as e:
+        except Exception:
+            pass
 
     def _build_targets(self):
         """Build list of harvest targets from targets configuration."""
