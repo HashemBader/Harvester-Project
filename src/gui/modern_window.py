@@ -74,8 +74,12 @@ class ModernMainWindow(QMainWindow):
         self.notification_manager = NotificationManager(self)
         self.notification_manager.setup_system_tray()
 
-        # Apply Global V2 Theme
-        self.setStyleSheet(V2_STYLESHEET)
+        # Apply User's Saved Theme
+        try:
+            self._apply_theme(self._theme_manager.get_theme())
+        except Exception:
+            self.setStyleSheet(V2_STYLESHEET)
+
         self._setup_layout()
         self._apply_advanced_mode()
 
