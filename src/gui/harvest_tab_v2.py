@@ -731,6 +731,7 @@ class HarvestTabV2(QWidget):
         path_layout = QHBoxLayout()
         # Banner (Hidden initially)
         self.banner_frame = QFrame()
+        self.banner_frame.setObjectName("HarvestBanner")
         self.banner_frame.setProperty("class", "Card")
         self.banner_frame.setMinimumHeight(48)
 

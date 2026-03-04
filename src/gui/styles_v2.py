@@ -636,6 +636,16 @@ QPushButton#DashboardProfileAction:pressed {{
     background-color: {t['surface2']};
 }}
 
+/* Harvester Banner Success State */
+QFrame#HarvestBanner[state="completed"] {{
+    background-color: {t['success']};
+    border: 1px solid {t['success']};
+}}
+
+QFrame#HarvestBanner[state="completed"] QLabel {{
+    color: #ffffff;
+}}
+
 /* --- Links & Utilities --- */
 QPushButton[class="LinkButton"], QPushButton.LinkButton {{
     color: {t['primary']};
