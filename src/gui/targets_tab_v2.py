@@ -4,7 +4,6 @@ Purpose: A modern, dark-themed Target Management tab.
          Integrates with TargetsManager for persistence.
 """
 
-from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import sys
@@ -13,7 +12,7 @@ import urllib.request
 # Add src to path for utils/z3950 imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from PyQt6.QtCore import Qt, QDateTime, pyqtSignal, QEvent, QSize
+from PyQt6.QtCore import Qt, pyqtSignal, QEvent, QSize
 from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import (
     QWidget,
@@ -33,8 +32,6 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QCheckBox,
     QComboBox,
-    QListWidget,
-    QListWidgetItem,
     QToolButton,
     QInputDialog,
     QSizePolicy,
@@ -252,63 +249,6 @@ class TargetDialog(QDialog):
 
 
 
-class RestoreDialog(QDialog):
-    """Dialog to show edit/delete history and restore items."""
-
-    def __init__(self, history, parent=None):
-        super().__init__(parent)
-        self.setWindowTitle("Restore History")
-        self.resize(500, 400)
-        self.history = history
-        self._setup_ui()
-        self._apply_styles()
-
-    def _setup_ui(self):
-        layout = QVBoxLayout()
-
-        lbl = QLabel("Select an action to undo:")
-        layout.addWidget(lbl)
-
-        self.list_widget = QListWidget()
-        for idx, item in enumerate(self.history):
-            action = item["type"]
-            target_name = item["snapshot"].name if item["snapshot"] else "Unknown"
-            time_str = item["timestamp"].toString("HH:mm:ss")
-            text = f"[{time_str}] {action}: {target_name}"
-
-            list_item = QListWidgetItem(text)
-            list_item.setData(Qt.ItemDataRole.UserRole, idx)
-            self.list_widget.addItem(list_item)
-
-        layout.addWidget(self.list_widget)
-
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Restore")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
-
-        self.setLayout(layout)
-
-    def _apply_styles(self):
-        self.setStyleSheet(
-            """
-            QDialog { background-color: #1e1e2e; color: #cdd6f4; }
-            QListWidget { background-color: #313244; color: #ffffff; border: 1px solid #45475a; border-radius: 4px; }
-            QLabel { color: #cdd6f4; font-weight: bold; }
-            QPushButton { background-color: #313244; color: white; border: 1px solid #45475a; padding: 6px 12px; border-radius: 4px; }
-            QPushButton:hover { background-color: #45475a; }
-        """
-        )
-
-    def get_selected_index(self):
-        if len(self.list_widget.selectedItems()) > 0:
-            return self.list_widget.selectedItems()[0].data(Qt.ItemDataRole.UserRole)
-        return None
-
-
 class TargetsTabV2(QWidget):
     """
     The main widget for configuring targets.
@@ -322,7 +262,6 @@ class TargetsTabV2(QWidget):
         active_profile = self._profile_manager.get_active_profile()
         targets_file = self._profile_manager.get_targets_file(active_profile)
         self.manager = TargetsManager(targets_file=targets_file)
-        self.history = []
         self.server_status = {}  # Cache for server status checks
         self._setup_ui()
         self._check_on_startup()  # Check APIs + active Z3950 on launch
@@ -367,7 +306,6 @@ class TargetsTabV2(QWidget):
         targets_file = self._profile_manager.get_targets_file(profile_name)
         self.manager = TargetsManager(targets_file=targets_file)
         self.server_status.clear()
-        self.history.clear()
         self._check_on_startup()
 
     def eventFilter(self, obj, event):
@@ -419,11 +357,6 @@ class TargetsTabV2(QWidget):
         self.btn_add.setObjectName("PrimaryButton")
         self.btn_add.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_add.clicked.connect(self.add_target)
-
-        self.btn_restore = QPushButton("Restore History")
-        self.btn_restore.setObjectName("SecondaryButton")
-        self.btn_restore.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.btn_restore.clicked.connect(self.show_restore_dialog)
 
         self.btn_check_servers = QPushButton("Check Servers")
         self.btn_check_servers.setObjectName("SecondaryButton")
@@ -480,7 +413,6 @@ class TargetsTabV2(QWidget):
         search_layout.addWidget(self.search_clear_btn)
 
         btn_layout.addWidget(self.btn_add)
-        btn_layout.addWidget(self.btn_restore)
         btn_layout.addWidget(self.btn_check_servers)
         btn_layout.addStretch()
         btn_layout.addWidget(self.search_container)
@@ -972,7 +904,6 @@ class TargetsTabV2(QWidget):
             return
 
         if result == QDialog.DialogCode.Accepted:
-            self._track_history("EDIT", target)
             data = dialog.get_data()
 
             target.name = data["name"]
@@ -1013,7 +944,6 @@ class TargetsTabV2(QWidget):
         )
 
         if confirm == QMessageBox.StandardButton.Yes:
-            self._track_history("DELETE", target)
             self.manager.delete_target(target.target_id)
             self.refresh_targets()
 
@@ -1064,50 +994,5 @@ class TargetsTabV2(QWidget):
             name = name_item.text().lower() if name_item else ""
             visible = text in name
             self.table.setRowHidden(row, not visible)
-
-    def _track_history(self, action_type, target):
-        """Save a snapshot of the target state."""
-        snapshot = deepcopy(target)
-        self.history.append(
-            {
-                "type": action_type,
-                "snapshot": snapshot,
-                "timestamp": QDateTime.currentDateTime(),
-            }
-        )
-        if len(self.history) > 50:
-            self.history.pop(0)
-
-    def show_restore_dialog(self):
-        """Show the restore history dialog."""
-        if not self.history:
-            QMessageBox.information(self, "History", "No actions to restore in this session.")
-            return
-
-        dialog = RestoreDialog(self.history, self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            idx = dialog.get_selected_index()
-            if idx is not None:
-                item = self.history.pop(idx)
-                self._restore_item(item)
-
-    def _restore_item(self, item):
-        """Restore the target based on action type."""
-        action = item["type"]
-        snapshot = item["snapshot"]
-
-        if action == "DELETE":
-            all_targets = self.manager.get_all_targets()
-            next_rank = max((t.rank for t in all_targets), default=0) + 1
-
-            snapshot.rank = next_rank
-            self.manager.add_target(snapshot)
-            self.refresh_targets()
-            QMessageBox.information(self, "Restored", f"Restored '{snapshot.name}' to end of list.")
-
-        elif action == "EDIT":
-            self.manager.modify_target(snapshot)
-            self.refresh_targets()
-            QMessageBox.information(self, "Restored", f"Reverted changes to '{snapshot.name}'.")
 
 
