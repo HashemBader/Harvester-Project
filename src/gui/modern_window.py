@@ -174,6 +174,16 @@ class ModernMainWindow(QMainWindow):
         self.btn_accessibility.setToolTip(f"Open accessibility statement ({mod_label}+Shift+A)")
         sidebar_layout.addWidget(self.btn_accessibility)
 
+        # Theme toggle button (bottom, like Accessibility)
+        self.btn_theme = QPushButton("Toggle Theme")
+        self.btn_theme.setIcon(get_icon(SVG_SETTINGS, "#a5adcb")) # Will be replaced dynamically in _apply_theme
+        self.btn_theme.setObjectName("NavButton")
+        self.btn_theme.setProperty("class", "NavButton")
+        self.btn_theme.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_theme.clicked.connect(self._toggle_theme)
+        self.btn_theme.setToolTip("Toggle application theme (dark / light)")
+        sidebar_layout.addWidget(self.btn_theme)
+
         main_layout.addWidget(self.sidebar)
 
         # 2. Right Content Area
@@ -525,6 +535,19 @@ class ModernMainWindow(QMainWindow):
                 return
             self.harvest_tab.stop_harvest()
         event.accept()
+    def _toggle_theme(self):
+        """Toggle between dark and light themes and apply immediately."""
+        try:
+            current = self._theme_manager.get_theme()
+            new = "light" if current == "dark" else "dark"
+            self._apply_theme(new)
+        except Exception:
+            # best-effort only
+            try:
+                self._apply_theme("dark")
+            except Exception:
+                pass
+
     def _apply_theme(self, theme: str):
         """Apply color theme (light or dark) dynamically generated from styles_v2.
 
