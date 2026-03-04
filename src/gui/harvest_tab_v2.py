@@ -1115,14 +1115,9 @@ class HarvestTabV2(QWidget):
                 fail = stats.get("failed", 0)
                 inv = stats.get("skipped", 0)  # approximations
 
-                if fail > 0:
-                    self.lbl_banner_stats.setText(
-                        f"Success: {succ} &nbsp;|&nbsp; <span style='color: #ed8796; font-weight: bold;'>Failed: {fail}</span> &nbsp;|&nbsp; Skipped: {inv}"
-                    )
-                else:
-                    self.lbl_banner_stats.setText(
-                        f"Success: {succ} &nbsp;|&nbsp; Failed: {fail} &nbsp;|&nbsp; Skipped: {inv}"
-                    )
+                self.lbl_banner_stats.setText(
+                    f"<b>Success: {succ} &nbsp;|&nbsp; Failed: {fail} &nbsp;|&nbsp; Skipped: {inv}</b>"
+                )
 
         # Apply changes to banner
         self.banner_frame.style().unpolish(self.banner_frame)
