@@ -487,9 +487,6 @@ class ModernMainWindow(QMainWindow):
             self.status_pill.setText("Error")
             self.status_pill.setProperty("state", "error")
         else:
-            self.status_pill.setText("Cancelled")
-            self.status_pill.setProperty("state", "error")
-        else:
             self.status_pill.setText("Failed")
             self.status_pill.setProperty("state", "error")
             
