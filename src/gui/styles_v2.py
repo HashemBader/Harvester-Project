@@ -643,7 +643,7 @@ QFrame#HarvestBanner[state="completed"] {{
 }}
 
 QFrame#HarvestBanner[state="completed"] QLabel {{
-    color: #ffffff;
+    color: {t['text']};
 }}
 
 /* --- Links & Utilities --- */

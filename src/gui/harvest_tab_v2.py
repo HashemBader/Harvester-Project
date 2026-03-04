@@ -204,19 +204,6 @@ class HarvestWorkerV2(QThread):
                     )
                     self._update_processed()
 
-                elif event == "target_start":
-                    target_name = payload.get("target") or payload.get(
-                        "target_name", ""
-                    )
-                    self.progress_update.emit(
-                        isbn,
-                        "trying",
-                        target_name,
-                        messages.HarvestMessages.checking_target.format(
-                            target=target_name
-                        ),
-                    )
-
                 elif event == "success":
                     source = payload.get("target", "")
                     self.progress_update.emit(isbn, "found", source, "Found")
@@ -1583,7 +1570,7 @@ class HarvestTabV2(QWidget):
             return {}
 
     def _on_progress(self, isbn, status, source, msg):
-        log_msg = f"{isbn}: {msg}"
+        log_msg = msg
         self.log_output.setText(log_msg)
         self.progress_updated.emit(isbn, status, source, msg)
 
