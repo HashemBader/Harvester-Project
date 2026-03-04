@@ -39,7 +39,7 @@ class CreateProfileDialog(QDialog):
         layout.addWidget(title)
 
         subtitle = QLabel("Choose a profile name and starting settings.")
-        subtitle.setStyleSheet(f"color: {CATPPUCCIN_THEME['subtext0']}; font-size: 12px;")
+        subtitle.setStyleSheet(f"color: {CATPPUCCIN_THEME['text_muted']}; font-size: 12px;")
         layout.addWidget(subtitle)
 
         name_label = QLabel("Profile Name")
@@ -171,7 +171,7 @@ class ConfigTabV2(QWidget):
         title.setStyleSheet(f"font-size: 24px; font-weight: bold; color: {CATPPUCCIN_THEME['text']};")
         
         subtitle = QLabel("Manage profiles and global settings")
-        subtitle.setStyleSheet(f"font-size: 14px; color: {CATPPUCCIN_THEME['subtext0']};")
+        subtitle.setStyleSheet(f"font-size: 14px; color: {CATPPUCCIN_THEME['text_muted']};")
         
         title_block.addWidget(title)
         title_block.addWidget(subtitle)
@@ -191,7 +191,7 @@ class ConfigTabV2(QWidget):
         
         # Icon
         icon_lbl = QLabel()
-        icon_lbl.setPixmap(get_pixmap(SVG_SETTINGS, CATPPUCCIN_THEME['blue']))
+        icon_lbl.setPixmap(get_pixmap(SVG_SETTINGS, CATPPUCCIN_THEME['primary']))
         profile_layout.addWidget(icon_lbl)
         
         # Selector
@@ -200,7 +200,7 @@ class ConfigTabV2(QWidget):
         lbl.setStyleSheet(f"font-weight: bold; color: {CATPPUCCIN_THEME['text']};")
         
         self.profile_combo = QComboBox()
-        self.profile_combo.setMinimumWidth(250)
+        self.profile_combo.setMinimumWidth(300)
         self.profile_combo.setProperty("class", "ComboBox")
         self.profile_combo.setAccessibleName("Active profile selector")
         self.profile_combo.setAccessibleDescription("Choose which saved profile is active.")
@@ -210,6 +210,11 @@ class ConfigTabV2(QWidget):
         
         info_layout.addWidget(lbl)
         info_layout.addWidget(self.profile_combo)
+        
+        profile_helper = QLabel("Profile controls targets + settings")
+        profile_helper.setStyleSheet(f"color: {CATPPUCCIN_THEME['text_muted']}; font-size: 12px;")
+        info_layout.addWidget(profile_helper)
+        
         profile_layout.addLayout(info_layout)
         
         profile_layout.addStretch()
@@ -269,7 +274,7 @@ class ConfigTabV2(QWidget):
         retry_lbl = QLabel("&Retry Interval (Days)")
         retry_lbl.setStyleSheet(f"color: {CATPPUCCIN_THEME['text']};")
         retry_desc = QLabel("Skip ISBNs that failed recently")
-        retry_desc.setStyleSheet(f"color: {CATPPUCCIN_THEME['subtext0']}; font-size: 12px;")
+        retry_desc.setStyleSheet(f"color: {CATPPUCCIN_THEME['text_muted']}; font-size: 12px;")
         
         desc_layout = QVBoxLayout()
         desc_layout.addWidget(retry_lbl)
@@ -297,15 +302,15 @@ class ConfigTabV2(QWidget):
         mode_row = QHBoxLayout()
         mode_lbl = QLabel("Call Number &Mode")
         mode_lbl.setStyleSheet(f"color: {CATPPUCCIN_THEME['text']};")
-        mode_desc = QLabel("Choose which call number type is accepted during harvest")
-        mode_desc.setStyleSheet(f"color: {CATPPUCCIN_THEME['subtext0']}; font-size: 12px;")
+        mode_desc = QLabel("Choose which call number type to accept")
+        mode_desc.setStyleSheet(f"color: {CATPPUCCIN_THEME['text_muted']}; font-size: 12px;")
 
         mode_desc_layout = QVBoxLayout()
         mode_desc_layout.addWidget(mode_lbl)
         mode_desc_layout.addWidget(mode_desc)
 
         self.call_number_combo = QComboBox()
-        self.call_number_combo.setFixedWidth(180)
+        self.call_number_combo.setFixedWidth(300)
         self.call_number_combo.setAccessibleName("Call number mode")
         self.call_number_combo.setAccessibleDescription("Choose whether to collect LCCN only, NLMCN only, or both.")
         self.call_number_combo.setToolTip("Select which call-number type is accepted during harvest")
@@ -330,7 +335,7 @@ class ConfigTabV2(QWidget):
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setFrameShadow(QFrame.Shadow.Sunken)
-        line.setStyleSheet(f"background-color: {CATPPUCCIN_THEME['surface1']}; max-height: 1px;")
+        line.setStyleSheet(f"background-color: {CATPPUCCIN_THEME['border']}; max-height: 1px;")
         return line
 
     def _comparable_settings(self, settings):

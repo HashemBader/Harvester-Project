@@ -25,7 +25,8 @@ from .accessibility_statement_dialog import AccessibilityStatementDialog
 from .icons import (
     get_icon, get_pixmap, 
     SVG_DASHBOARD, SVG_INPUT, SVG_TARGETS, SVG_SETTINGS, 
-    SVG_HARVEST, SVG_AI, SVG_CHEVRON_LEFT, SVG_CHEVRON_RIGHT
+    SVG_HARVEST, SVG_AI, SVG_CHEVRON_LEFT, SVG_CHEVRON_RIGHT,
+    SVG_TOGGLE_ON, SVG_TOGGLE_OFF
 )
 from .theme_manager import ThemeManager
 from config.profile_manager import ProfileManager
@@ -149,7 +150,7 @@ class ModernMainWindow(QMainWindow):
         self.status_pill.setProperty("class", "StatusPill") # Helper for some qt styles
         self.status_pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_pill.setFixedSize(100, 30)
-        self.status_pill.setStyleSheet("background-color: #363a4f; color: #d4daf2; border-radius: 15px; font-weight: bold;")
+        self.status_pill.setProperty("state", "idle")
         
         status_frame = QWidget()
         status_layout = QHBoxLayout(status_frame)
@@ -245,6 +246,7 @@ class ModernMainWindow(QMainWindow):
 
     def _create_nav_btn(self, text, svg_icon, index):
         btn = QPushButton(text)
+        btn.setObjectName("NavButton")
         btn.setProperty("class", "NavButton")
         btn.setCheckable(True)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -362,7 +364,13 @@ class ModernMainWindow(QMainWindow):
         else:
             self.btn_shortcuts.setText("Shortcuts")
             self.btn_accessibility.setText("Accessibility Statement")
-            self.btn_theme.setText("Toggle Theme")
+            
+            # Dynamic text for Theme based on current mode
+            try:
+                current_mode = self._theme_manager.get_theme()
+                self.btn_theme.setText("Theme: Light" if current_mode == "light" else "Theme: Dark")
+            except:
+                self.btn_theme.setText("Toggle Theme")
 
     def _on_nav_clicked(self, btn):
         index = btn.property("page_index")
@@ -479,7 +487,9 @@ class ModernMainWindow(QMainWindow):
 
     def _on_harvest_started(self):
         self.status_pill.setText("Running")
-        self.status_pill.setStyleSheet("background-color: #8aadf4; color: #1e2030; border-radius: 15px; font-weight: bold;")
+        self.status_pill.setProperty("state", "running")
+        self.status_pill.style().unpolish(self.status_pill)
+        self.status_pill.style().polish(self.status_pill)
         self.btn_harvest.click()
         self.dashboard_tab.set_running()
 
@@ -488,13 +498,17 @@ class ModernMainWindow(QMainWindow):
         is_cancelled = isinstance(stats, dict) and stats.get("cancelled", False)
         has_error = isinstance(stats, dict) and bool(stats.get("error"))
         if success:
-            pass
+            self.status_pill.setText("Completed")
+            self.status_pill.setProperty("state", "success")
         elif isinstance(stats, dict) and stats.get("cancelled", False):
-            # Quietly finish without an error toast for deliberate cancellations
-            pass
-        else:
             self.status_pill.setText("Cancelled")
-            self.status_pill.setStyleSheet("background-color: #ed8796; color: #1e1e2e; border-radius: 15px; font-weight: bold;")
+            self.status_pill.setProperty("state", "error")
+        else:
+            self.status_pill.setText("Failed")
+            self.status_pill.setProperty("state", "error")
+            
+        self.status_pill.style().unpolish(self.status_pill)
+        self.status_pill.style().polish(self.status_pill)
         self.dashboard_tab.refresh_data()
         
         if isinstance(stats, dict) and not stats.get("cancelled", False) and not success:
@@ -527,92 +541,34 @@ class ModernMainWindow(QMainWindow):
         event.accept()
 
     def _apply_theme(self, theme: str):
-        """Apply color theme (light first, then optional pyqtdarktheme for dark).
+        """Apply color theme (light or dark) dynamically generated from styles_v2.
 
         Strategy:
-        - Apply the light stylesheet first to create a consistent base.
-        - If dark is requested, attempt to use `pyqtdarktheme` (best-effort) to
-          obtain and apply a richer dark stylesheet. If that fails, fall back to
-          the internal dark palette via `generate_stylesheet(CATPPUCCIN_DARK)`.
+        - Generate the complete application stylesheet based on the active mode.
         - Persist the selection via ThemeManager.
         """
         try:
             mode = theme if isinstance(theme, str) and theme in ("dark", "light") else self._theme_manager.get_theme()
 
-            # Apply light base first for a predictable starting state
-            try:
-                light_qss = generate_stylesheet(CATPPUCCIN_LIGHT)
-                self.setStyleSheet(light_qss)
-            except Exception:
-                # fallback to bundled stylesheet if generation fails
-                try:
-                    self.setStyleSheet(V2_STYLESHEET)
-                except Exception:
-                    pass
-
-            if mode == "dark":
-                # Best-effort: try to use pyqtdarktheme if installed
-                try:
-                    import pyqtdarktheme as _pdt
-                    stylesheet = None
-
-                    # Candidate functions that may produce a QSS string
-                    candidates = (
-                        "apply_dark_theme", "enable_dark_theme", "setup_theme",
-                        "get_stylesheet", "load_stylesheet", "get_qss", "get_style_sheet",
-                    )
-                    applied_by_module = False
-                    for cand in candidates:
-                        func = getattr(_pdt, cand, None)
-                        if callable(func):
-                            try:
-                                # Some APIs accept a widget/window reference
-                                try:
-                                    out = func(self)
-                                except TypeError:
-                                    out = func()
-                                # If function returns a stylesheet string, use it
-                                if isinstance(out, str) and out.strip():
-                                    stylesheet = out
-                                    break
-                                # If function returns None or True, assume it applied the theme directly
-                                if out is None or out is True:
-                                    stylesheet = None
-                                    applied_by_module = True
-                                    break
-                            except Exception:
-                                stylesheet = None
-                                applied_by_module = False
-
-                    # Try module-level stylesheet variables
-                    if not stylesheet:
-                        for var in ("STYLESHEET", "STYLE_SHEET", "stylesheet", "style_sheet"):
-                            val = getattr(_pdt, var, None)
-                            if isinstance(val, str) and val.strip():
-                                stylesheet = val
-                                break
-
-                    if stylesheet:
-                        self.setStyleSheet(stylesheet)
-                    elif applied_by_module:
-                        # Module applied theme in-place — don't override
-                        pass
-                    else:
-                        self.setStyleSheet(generate_stylesheet(CATPPUCCIN_DARK))
-                except Exception:
-                    # pyqtdarktheme absent or failed; use internal dark stylesheet
-                    try:
-                        self.setStyleSheet(generate_stylesheet(CATPPUCCIN_DARK))
-                    except Exception:
-                        try:
-                            self.setStyleSheet(V2_STYLESHEET)
-                        except Exception:
-                            pass
+            if mode == "light":
+                qss = generate_stylesheet(CATPPUCCIN_LIGHT)
+                self.btn_theme.setIcon(get_icon(SVG_TOGGLE_OFF, CATPPUCCIN_LIGHT['text_muted']))
+                if not self.sidebar_collapsed:
+                    self.btn_theme.setText("Theme: Light")
             else:
-                # Light requested — already applied above
-                pass
+                qss = generate_stylesheet(CATPPUCCIN_DARK)
+                self.btn_theme.setIcon(get_icon(SVG_TOGGLE_ON, CATPPUCCIN_DARK['primary']))
+                if not self.sidebar_collapsed:
+                    self.btn_theme.setText("Theme: Dark")
+                
+            from PyQt6.QtWidgets import QApplication
+            app = QApplication.instance()
+            if app:
+                app.setStyleSheet(qss)
+            else:
+                self.setStyleSheet(qss)
 
-            # Persist selection (best-effort)
+            # Persist selection
             try:
                 self._theme_manager.set_theme(mode)
             except Exception:

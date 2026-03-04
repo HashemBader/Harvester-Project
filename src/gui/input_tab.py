@@ -28,18 +28,8 @@ class ClickableDropZone(QFrame):
         self.setAcceptDrops(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.normal_style = """
-            QFrame {
-                border: 3px dashed #f4b860;
-                border-radius: 12px;
-                background-color: #20262d;
-            }
-            QFrame:hover {
-                background-color: #232a32;
-                border-color: #5fb3a1;
-            }
-        """
-        self.setStyleSheet(self.normal_style)
+        self.setProperty("class", "DragZone")
+        self.setProperty("state", "ready")
 
     def mousePressEvent(self, event: QMouseEvent):
         """Handle mouse press to trigger click signal."""
@@ -54,19 +44,12 @@ class ClickableDropZone(QFrame):
                 file_path = url.toLocalFile()
                 if file_path:
                     event.acceptProposedAction()
-                    self.setStyleSheet("""
-                        QFrame {
-                            border: 3px dashed #7bc96f;
-                            border-radius: 12px;
-                            background-color: #1f2a22;
-                        }
-                    """)
+                    self._update_state("active")
                     return
         event.ignore()
 
     def dragLeaveEvent(self, event):
-        """Handle drag leave event."""
-        self.setStyleSheet(self.normal_style)
+        self._update_state("ready")
 
     def dropEvent(self, event: QDropEvent):
         """Handle drop event."""
@@ -78,17 +61,11 @@ class ClickableDropZone(QFrame):
             self.fileDropped.emit(file_path)
 
             # Animate success
-            self.setStyleSheet("""
-                QFrame {
-                    border: 3px solid #7bc96f;
-                    border-radius: 12px;
-                    background-color: #243329;
-                }
-            """)
+            self._update_state("success")
 
             # Reset after delay
             from PyQt6.QtCore import QTimer
-            QTimer.singleShot(500, lambda: self.setStyleSheet(self.normal_style))
+            QTimer.singleShot(500, lambda: self._update_state("ready"))
 
             event.acceptProposedAction()
         else:
@@ -99,7 +76,12 @@ class ClickableDropZone(QFrame):
                 "Please drop a valid file."
             )
             event.ignore()
-            self.setStyleSheet(self.normal_style)
+            self._update_state("ready")
+            
+    def _update_state(self, state: str):
+        self.setProperty("state", state)
+        self.style().unpolish(self)
+        self.style().polish(self)
 
 
 class InputTab(QWidget):

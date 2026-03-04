@@ -550,38 +550,26 @@ class DroppableGroupBox(QGroupBox):
     def __init__(self, title, parent=None):
         super().__init__(title, parent)
         self.setAcceptDrops(True)
-        self.normal_style = """
-            QGroupBox {
-                border: 1px solid #363a4f;
-                border-radius: 8px;
-                margin-top: 1ex;
-                background-color: #1e2030;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 3px;
-                color: #cad3f5;
-            }
-        """
-        self.setStyleSheet(self.normal_style)
+        self.setObjectName("DroppableArea")
+        self.setProperty("dropState", "normal")
+
+    def _update_state(self, state: str):
+        self.setProperty("dropState", state)
+        self.style().unpolish(self)
+        self.style().polish(self)
 
     def dragEnterEvent(self, event: QDragEnterEvent):
         if event.mimeData().hasUrls():
             for url in event.mimeData().urls():
                 file_path = url.toLocalFile()
-                if file_path.endswith((".tsv", ".txt", ".csv")):
+                if True:  # Accept all types or handled elsewhere
                     event.acceptProposedAction()
-                    self.setStyleSheet(
-                        self.normal_style.replace("#363a4f", "#7bc96f").replace(
-                            "#1e2030", "#1f2a22"
-                        )
-                    )
+                    self._update_state("hover")
                     return
         event.ignore()
 
     def dragLeaveEvent(self, event):
-        self.setStyleSheet(self.normal_style)
+        self._update_state("normal")
 
     def dropEvent(self, event: QDropEvent):
         files = [url.toLocalFile() for url in event.mimeData().urls()]
@@ -590,14 +578,10 @@ class DroppableGroupBox(QGroupBox):
         if valid_files:
             file_path = valid_files[0]
             self.file_dropped.emit(file_path)
-            self.setStyleSheet(
-                self.normal_style.replace("#363a4f", "#7bc96f").replace(
-                    "#1e2030", "#243329"
-                )
-            )
+            self._update_state("dropped")
+            
             from PyQt6.QtCore import QTimer
-
-            QTimer.singleShot(500, lambda: self.setStyleSheet(self.normal_style))
+            QTimer.singleShot(500, lambda: self._update_state("normal"))
             event.acceptProposedAction()
         else:
             from PyQt6.QtWidgets import QMessageBox
@@ -606,7 +590,7 @@ class DroppableGroupBox(QGroupBox):
                 self, "Invalid File", "Please drop a valid TSV, TXT, or CSV file."
             )
             event.ignore()
-            self.setStyleSheet(self.normal_style)
+            self._update_state("normal")
 
 
 class UIState(Enum):
@@ -680,7 +664,7 @@ class HarvestTabV2(QWidget):
         _scroll = QScrollArea()
         _scroll.setWidgetResizable(True)
         _scroll.setFrameShape(QFrame.Shape.NoFrame)
-        _scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        _scroll.setProperty("class", "ScrollArea")
         _scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         _scr_content = QWidget()
         _scroll.setWidget(_scr_content)
@@ -747,30 +731,20 @@ class HarvestTabV2(QWidget):
         path_layout = QHBoxLayout()
         # Banner (Hidden initially)
         self.banner_frame = QFrame()
-        self.banner_frame.setStyleSheet("""
-            QFrame {
-                background-color: #181926;
-                border-radius: 8px;
-                border-left: 4px solid #45475a;
-            }
-        """)
+        self.banner_frame.setProperty("class", "Card")
         self.banner_frame.setMinimumHeight(48)
 
         banner_layout = QHBoxLayout(self.banner_frame)
         banner_layout.setContentsMargins(16, 12, 16, 12)
 
         self.lbl_banner_title = QLabel("READY")
-        self.lbl_banner_title.setStyleSheet(
-            "color: #a5adcb; font-size: 16px; font-weight: bold; letter-spacing: 1px; border: none;"
-        )
+        self.lbl_banner_title.setProperty("class", "CardTitle")
 
         self.lbl_banner_stats = QLabel("")
         self.lbl_banner_stats.setAlignment(
             Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
         )
-        self.lbl_banner_stats.setStyleSheet(
-            "color: #a5adcb; font-size: 13px; border: none;"
-        )
+        self.lbl_banner_stats.setProperty("class", "HelperText")
         self.lbl_banner_stats.setVisible(False)
 
         banner_layout.addWidget(self.lbl_banner_title)
@@ -793,7 +767,7 @@ class HarvestTabV2(QWidget):
 
         # Row 0: Input File
         lbl_input = QLabel("Input file:")
-        lbl_input.setStyleSheet("color: #a5adcb; font-size: 13px; font-weight: bold;")
+        lbl_input.setProperty("class", "HelperText")
 
         file_input_layout = QHBoxLayout()
         self.file_path_edit = QLineEdit()
@@ -801,9 +775,7 @@ class HarvestTabV2(QWidget):
             "No file selected... (drag & drop TSV/CSV/TXT here)"
         )
         self.file_path_edit.setReadOnly(True)
-        self.file_path_edit.setStyleSheet(
-            "background-color: transparent; color: #cad3f5; border: none; font-size: 14px;"
-        )
+        self.file_path_edit.setProperty("class", "LineEdit")
 
         self.btn_browse = QPushButton("Choose file...")
         self.btn_browse.setProperty("class", "PrimaryButton")
@@ -838,14 +810,14 @@ class HarvestTabV2(QWidget):
 
         def create_tile(title):
             card = QFrame()
-            card.setStyleSheet("background-color: #181926; border-radius: 6px;")
+            card.setProperty("class", "Card")
             clayout = QVBoxLayout(card)
             clayout.setContentsMargins(12, 12, 12, 12)
 
             lbl_title = QLabel(title)
-            lbl_title.setStyleSheet("color: #a5adcb; font-size: 12px;")
+            lbl_title.setProperty("class", "CardHelper")
             lbl_val = QLabel("-")
-            lbl_val.setStyleSheet("color: #cad3f5; font-size: 20px; font-weight: bold;")
+            lbl_val.setProperty("class", "CardValue")
             lbl_val.setAlignment(
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
             )
@@ -878,20 +850,18 @@ class HarvestTabV2(QWidget):
 
         def add_status_row(grid, row, title, val_widget):
             lbl = QLabel(title)
-            lbl.setStyleSheet("color: #a5adcb; font-size: 13px;")
+            lbl.setProperty("class", "HelperText")
             grid.addWidget(lbl, row, 0)
             grid.addWidget(val_widget, row, 1)
 
         status_grid = QGridLayout()
 
         self.lbl_run_status = QLabel("Idle")
-        self.lbl_run_status.setStyleSheet(
-            "color: #8aadf4; font-size: 14px; font-weight: bold;"
-        )
+        self.lbl_run_status.setProperty("class", "ActivityValue")
         self.lbl_run_progress = QLabel("0 / 0")
-        self.lbl_run_progress.setStyleSheet("color: #cad3f5; font-size: 14px;")
+        self.lbl_run_progress.setProperty("class", "ActivityValue")
         self.lbl_run_elapsed = QLabel("00:00:00")
-        self.lbl_run_elapsed.setStyleSheet("color: #cad3f5; font-size: 14px;")
+        self.lbl_run_elapsed.setProperty("class", "ActivityValue")
 
         add_status_row(status_grid, 0, "Status:", self.lbl_run_status)
         add_status_row(status_grid, 1, "Progress:", self.lbl_run_progress)
@@ -929,17 +899,7 @@ class HarvestTabV2(QWidget):
 
         self.preview_text = QTextEdit()
         self.preview_text.setReadOnly(True)
-        self.preview_text.setStyleSheet("""
-            QTextEdit {
-                background-color: #181926;
-                border: 1px solid #363a4f;
-                border-radius: 4px;
-                padding: 10px;
-                font-family: monospace;
-                font-size: 13px;
-                color: #cad3f5;
-            }
-        """)
+        self.preview_text.setProperty("class", "TerminalViewport")
         self.preview_text.setMinimumHeight(120)
 
         preview_layout.addWidget(self.preview_text)
@@ -959,22 +919,17 @@ class HarvestTabV2(QWidget):
         status_layout = QVBoxLayout()
 
         self.log_output = QLabel("Ready...")
-        self.log_output.setStyleSheet(
-            "color: #cad3f5; font-size: 13px; font-weight: bold;"
-        )
+        self.log_output.setProperty("class", "ActivityValue")
 
         progress_layout = QHBoxLayout()
         self.lbl_counts = QLabel("0 / 0 processed")
-        self.lbl_counts.setStyleSheet("color: #a5adcb; font-size: 12px;")
+        self.lbl_counts.setProperty("class", "HelperText")
 
         progress_layout.addWidget(self.lbl_counts)
         progress_layout.addStretch()
 
         self.progress_bar = QProgressBar()
-        self.progress_bar.setStyleSheet("""
-            QProgressBar { background-color: #181926; height: 8px; border-radius: 4px; border: none; }
-            QProgressBar::chunk { background-color: #8aadf4; border-radius: 4px; }
-        """)
+        self.progress_bar.setProperty("class", "TerminalProgressBar")
         self.progress_bar.setTextVisible(False)
         self.progress_bar.setMaximumHeight(8)
 
@@ -1070,28 +1025,24 @@ class HarvestTabV2(QWidget):
         show_stats = False
 
         if state == UIState.IDLE:
-            left_color = "#45475a"
-            text_color = "#a5adcb"
+            self.banner_frame.setProperty("state", "idle")
+            self.lbl_run_status.setProperty("state", "idle")
+            self.lbl_banner_title.setProperty("state", "idle")
             title_text = "READY"
 
             self.lbl_run_status.setText("Idle")
-            self.lbl_run_status.setStyleSheet(
-                "color: #a5adcb; font-size: 14px; font-weight: bold;"
-            )
 
             self.btn_start.setVisible(True)
             self.btn_start.setEnabled(False)
             self.btn_start.setText("Start Harvest")
 
         elif state == UIState.READY:
-            left_color = "#b4befe"  # Lavender
-            text_color = "#b4befe"
+            self.banner_frame.setProperty("state", "ready")
+            self.lbl_run_status.setProperty("state", "ready")
+            self.lbl_banner_title.setProperty("state", "ready")
             title_text = "READY"
 
             self.lbl_run_status.setText("Ready")
-            self.lbl_run_status.setStyleSheet(
-                "color: #b4befe; font-size: 14px; font-weight: bold;"
-            )
 
             self.btn_start.setVisible(True)
             self.btn_start.setEnabled(True)
@@ -1099,20 +1050,17 @@ class HarvestTabV2(QWidget):
             self.btn_start.setText(f"Start Harvest ({count} ISBNs)")
 
         elif state == UIState.RUNNING:
-            left_color = "#8aadf4"  # Blue
-            text_color = "#8aadf4"
+            self.banner_frame.setProperty("state", "running")
+            self.lbl_run_status.setProperty("state", "running")
+            self.lbl_banner_title.setProperty("state", "running")
             title_text = "RUNNING"
 
             self.lbl_run_status.setText("Running")
-            self.lbl_run_status.setStyleSheet(
-                "color: #8aadf4; font-size: 14px; font-weight: bold;"
-            )
 
-            # Reset progress bar to blue
-            self.progress_bar.setStyleSheet("""
-                QProgressBar { background-color: #181926; height: 8px; border-radius: 4px; border: none; }
-                QProgressBar::chunk { background-color: #8aadf4; border-radius: 4px; }
-            """)
+            # Reset progress bar style class (if customized in CSS)
+            self.progress_bar.setProperty("state", "running")
+            self.progress_bar.style().unpolish(self.progress_bar)
+            self.progress_bar.style().polish(self.progress_bar)
 
             self.btn_pause.setVisible(True)
             self.btn_pause.setEnabled(True)
@@ -1121,14 +1069,12 @@ class HarvestTabV2(QWidget):
             self.btn_stop.setEnabled(True)
 
         elif state == UIState.PAUSED:
-            left_color = "#eed49f"  # Yellow
-            text_color = "#eed49f"
+            self.banner_frame.setProperty("state", "paused")
+            self.lbl_run_status.setProperty("state", "paused")
+            self.lbl_banner_title.setProperty("state", "paused")
+            
             title_text = "PAUSED"
-
             self.lbl_run_status.setText("Paused")
-            self.lbl_run_status.setStyleSheet(
-                "color: #eeba0b; font-size: 14px; font-weight: bold;"
-            )
 
             self.btn_pause.setVisible(True)
             self.btn_pause.setEnabled(True)
@@ -1137,14 +1083,12 @@ class HarvestTabV2(QWidget):
             self.btn_stop.setEnabled(True)
 
         elif state == UIState.ERROR:
-            left_color = "#ed8796"  # Red
-            text_color = "#ed8796"
+            self.banner_frame.setProperty("state", "error")
+            self.lbl_run_status.setProperty("state", "error")
+            self.lbl_banner_title.setProperty("state", "error")
+            
             title_text = "ERROR"
-
             self.lbl_run_status.setText("Error")
-            self.lbl_run_status.setStyleSheet(
-                "color: #ed8796; font-size: 14px; font-weight: bold;"
-            )
 
             self.btn_start.setVisible(True)
             self.btn_start.setEnabled(False)
@@ -1152,15 +1096,14 @@ class HarvestTabV2(QWidget):
 
         elif state in (UIState.COMPLETED, UIState.CANCELLED):
             is_success = state == UIState.COMPLETED
-
-            left_color = "#a6da95" if is_success else "#ed8796"
-            text_color = left_color
+            state_prop = "completed" if is_success else "cancelled"
+            
+            self.banner_frame.setProperty("state", state_prop)
+            self.lbl_run_status.setProperty("state", state_prop)
+            self.lbl_banner_title.setProperty("state", state_prop)
+            
             title_text = "COMPLETED" if is_success else "CANCELLED"
-
             self.lbl_run_status.setText("Completed" if is_success else "Cancelled")
-            self.lbl_run_status.setStyleSheet(
-                f"color: {left_color}; font-size: 14px; font-weight: bold;"
-            )
 
             self.btn_new_run.setVisible(True)
 
@@ -1181,18 +1124,14 @@ class HarvestTabV2(QWidget):
                     )
 
         # Apply changes to banner
-        self.banner_frame.setStyleSheet(f"""
-            QFrame {{
-                background-color: {bg_color};
-                border-radius: 8px;
-                border-left: 4px solid {left_color};
-            }}
-        """)
-        self.banner_frame.setMinimumHeight(54)
+        self.banner_frame.style().unpolish(self.banner_frame)
+        self.banner_frame.style().polish(self.banner_frame)
+        self.lbl_run_status.style().unpolish(self.lbl_run_status)
+        self.lbl_run_status.style().polish(self.lbl_run_status)
+        self.lbl_banner_title.style().unpolish(self.lbl_banner_title)
+        self.lbl_banner_title.style().polish(self.lbl_banner_title)
+
         self.lbl_banner_title.setText(title_text)
-        self.lbl_banner_title.setStyleSheet(
-            f"color: {text_color}; font-size: 16px; font-weight: bold; letter-spacing: 1px; border: none;"
-        )
         self.lbl_banner_stats.setVisible(show_stats)
 
     def _setup_shortcuts(self):
@@ -1267,13 +1206,11 @@ class HarvestTabV2(QWidget):
             # Red highlight if invalid > 0
             self.lbl_val_invalid.setText(str(invalid_rows))
             if invalid_rows > 0:
-                self.lbl_val_invalid.setStyleSheet(
-                    "color: #ed8796; font-size: 20px; font-weight: bold;"
-                )
+                self.lbl_val_invalid.setProperty("state", "error")
             else:
-                self.lbl_val_invalid.setStyleSheet(
-                    "color: #cad3f5; font-size: 20px; font-weight: bold;"
-                )
+                self.lbl_val_invalid.setProperty("state", "idle")
+            self.lbl_val_invalid.style().unpolish(self.lbl_val_invalid)
+            self.lbl_val_invalid.style().polish(self.lbl_val_invalid)
 
             self.lbl_val_duplicates.setText(str(duplicate_valid_rows))
 
@@ -1355,21 +1292,20 @@ class HarvestTabV2(QWidget):
 
         self.lbl_counts.setText("0 / 0 processed")
         self.log_output.setText("Ready...")
-        self.log_output.setStyleSheet(
-            "color: #cad3f5; font-size: 13px; font-weight: bold;"
-        )
+        self.log_output.setProperty("state", "idle")
+        self.log_output.style().unpolish(self.log_output)
+        self.log_output.style().polish(self.log_output)
 
-        self.lbl_val_invalid.setStyleSheet(
-            "color: #cad3f5; font-size: 20px; font-weight: bold;"
-        )
+        self.lbl_val_invalid.setProperty("state", "idle")
+        self.lbl_val_invalid.style().unpolish(self.lbl_val_invalid)
+        self.lbl_val_invalid.style().polish(self.lbl_val_invalid)
 
         # Reset progress bar to default blue style
         self.progress_bar.setValue(0)
         self.progress_bar.setFormat("0/0 (0%)")
-        self.progress_bar.setStyleSheet("""
-            QProgressBar { background-color: #181926; height: 8px; border-radius: 4px; border: none; }
-            QProgressBar::chunk { background-color: #8aadf4; border-radius: 4px; }
-        """)
+        self.progress_bar.setProperty("state", "idle")
+        self.progress_bar.style().unpolish(self.progress_bar)
+        self.progress_bar.style().polish(self.progress_bar)
         self.lbl_run_progress.setText("0 / 0")
 
         self._transition_state(UIState.IDLE)
@@ -1393,9 +1329,9 @@ class HarvestTabV2(QWidget):
 
         self.lbl_counts.setText("0 / 0 processed")
         self.log_output.setText(error_msg)
-        self.log_output.setStyleSheet(
-            "color: #ed8796; font-size: 13px; font-weight: bold;"
-        )
+        self.log_output.setProperty("state", "error")
+        self.log_output.style().unpolish(self.log_output)
+        self.log_output.style().polish(self.log_output)
 
         self._transition_state(UIState.ERROR)
 
@@ -1701,9 +1637,9 @@ class HarvestTabV2(QWidget):
             if error_msg:
                 # Crash/exception — show a clear error dialog and keep the message
                 self.log_output.setText(f"Harvest failed: {error_msg}")
-                self.log_output.setStyleSheet(
-                    "color: #ed8796; font-size: 13px; font-weight: bold;"
-                )
+                self.log_output.setProperty("state", "error")
+                self.log_output.style().unpolish(self.log_output)
+                self.log_output.style().polish(self.log_output)
                 QMessageBox.critical(
                     self,
                     "Harvest Error",
@@ -1715,10 +1651,9 @@ class HarvestTabV2(QWidget):
             self.log_output.setText("Harvest complete. View results in Dashboard.")
 
             # Change progress bar green
-            self.progress_bar.setStyleSheet("""
-                QProgressBar { background-color: #181926; height: 8px; border-radius: 4px; border: none; }
-                QProgressBar::chunk { background-color: #a6da95; border-radius: 4px; }
-            """)
+            self.progress_bar.setProperty("state", "success")
+            self.progress_bar.style().unpolish(self.progress_bar)
+            self.progress_bar.style().polish(self.progress_bar)
 
         self.harvest_finished.emit(success, stats)
 
