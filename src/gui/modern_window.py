@@ -19,7 +19,7 @@ from .ai_assistant_tab import AIAssistantTab
 
 # Dialogs & Utils
 from .notifications import NotificationManager
-from .styles_v2 import V2_STYLESHEET, generate_stylesheet, CATPPUCCIN_DARK, CATPPUCCIN_LIGHT
+from .styles_v2 import V2_STYLESHEET
 from .shortcuts_dialog import ShortcutsDialog
 from .accessibility_statement_dialog import AccessibilityStatementDialog
 from .icons import (
@@ -28,7 +28,6 @@ from .icons import (
     SVG_HARVEST, SVG_AI, SVG_CHEVRON_LEFT, SVG_CHEVRON_RIGHT,
     SVG_TOGGLE_ON, SVG_TOGGLE_OFF
 )
-from .theme_manager import ThemeManager
 from config.profile_manager import ProfileManager
 
 class ModernMainWindow(QMainWindow):
@@ -68,9 +67,7 @@ class ModernMainWindow(QMainWindow):
         self.sidebar_collapsed = False
         self._shortcut_modifier = "Meta" if sys.platform == "darwin" else "Ctrl"
         self._profile_manager = ProfileManager()
-        # Theme manager: persist and read preferred theme
-        self._theme_manager = ThemeManager()
-
+        
         # Core Services
         self.notification_manager = NotificationManager(self)
         self.notification_manager.setup_system_tray()
@@ -177,16 +174,6 @@ class ModernMainWindow(QMainWindow):
         self.btn_accessibility.setToolTip(f"Open accessibility statement ({mod_label}+Shift+A)")
         sidebar_layout.addWidget(self.btn_accessibility)
 
-        # Theme toggle button (bottom, like Accessibility)
-        self.btn_theme = QPushButton("Toggle Theme (BETA)")
-        self.btn_theme.setIcon(get_icon(SVG_SETTINGS, "#a5adcb"))
-        self.btn_theme.setObjectName("NavButton")
-        self.btn_theme.setProperty("class", "NavButton")
-        self.btn_theme.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_theme.clicked.connect(self._toggle_theme)
-        self.btn_theme.setToolTip("Toggle application theme (dark / light)")
-        sidebar_layout.addWidget(self.btn_theme)
-
         main_layout.addWidget(self.sidebar)
 
         # 2. Right Content Area
@@ -218,14 +205,7 @@ class ModernMainWindow(QMainWindow):
         self.stack.addWidget(self.ai_assistant_tab) # 4
 
         content_layout.addWidget(self.stack)
-        
-        # Wrap content in a scroll area to prevent squishing on resize
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
-        scroll_area.setWidget(content_container)
-        
-        main_layout.addWidget(scroll_area)
+        main_layout.addWidget(content_container)
 
         # --- Wire Up V2 Data Flow ---
         # HarvestTab needs access to Config and Targets to run
@@ -270,7 +250,6 @@ class ModernMainWindow(QMainWindow):
 
         self.btn_shortcuts.setAccessibleName("Show keyboard shortcuts")
         self.btn_accessibility.setAccessibleName("Show accessibility statement")
-        self.btn_theme.setAccessibleName("Toggle application theme")
         self.status_pill.setAccessibleName("Application status")
 
     def _setup_shortcuts(self):
@@ -359,12 +338,9 @@ class ModernMainWindow(QMainWindow):
             self.btn_shortcuts.setToolTip("Keyboard shortcuts")
             self.btn_accessibility.setText("")
             self.btn_accessibility.setToolTip("Accessibility statement")
-            self.btn_theme.setText("")
-            self.btn_theme.setToolTip("Toggle application theme (dark / light)")
         else:
             self.btn_shortcuts.setText("Shortcuts")
             self.btn_accessibility.setText("Accessibility Statement")
-            
             # Dynamic text for Theme based on current mode
             try:
                 current_mode = self._theme_manager.get_theme()
@@ -382,6 +358,10 @@ class ModernMainWindow(QMainWindow):
         # Harvest Signals
         self.harvest_tab.harvest_started.connect(self._on_harvest_started)
         self.harvest_tab.harvest_finished.connect(self._on_harvest_finished)
+        self.harvest_tab.result_files_ready.connect(self.dashboard_tab.set_result_files)
+        self.harvest_tab.harvest_reset.connect(self._on_harvest_reset)
+        self.harvest_tab.harvest_paused.connect(self._on_harvest_paused)
+        
         # Live Dashboard Updates
         self.harvest_tab.progress_updated.connect(self._on_harvest_progress)
 
@@ -500,7 +480,13 @@ class ModernMainWindow(QMainWindow):
         if success:
             self.status_pill.setText("Completed")
             self.status_pill.setProperty("state", "success")
-        elif isinstance(stats, dict) and stats.get("cancelled", False):
+        elif is_cancelled:
+            self.status_pill.setText("Cancelled")
+            self.status_pill.setProperty("state", "error")
+        elif has_error:
+            self.status_pill.setText("Error")
+            self.status_pill.setProperty("state", "error")
+        else:
             self.status_pill.setText("Cancelled")
             self.status_pill.setProperty("state", "error")
         else:
@@ -513,22 +499,25 @@ class ModernMainWindow(QMainWindow):
         
         if isinstance(stats, dict) and not stats.get("cancelled", False) and not success:
             error_msg = stats.get("error", "Harvest stopped or failed") if isinstance(stats, dict) else "Harvest stopped or failed"
-            # Skipping error notification per user request
+            self.notification_manager.notify_harvest_error(error_msg)
             
         self.dashboard_tab.set_idle(success)
 
-    def _toggle_theme(self):
-        """Toggle between dark and light themes and apply immediately."""
-        try:
-            current = self._theme_manager.get_theme()
-            new = "light" if current == "dark" else "dark"
-            self._apply_theme(new)
-        except Exception:
-            # best-effort only
-            try:
-                self._apply_theme("dark")
-            except Exception:
-                pass
+    def _on_harvest_paused(self, is_paused: bool):
+        """Sync sidebar and dashboard pills when harvest is paused or resumed."""
+        if is_paused:
+            self.status_pill.setText("Paused")
+            self.status_pill.setStyleSheet("background-color: #eeba0b; color: #1e2030; border-radius: 15px; font-weight: bold;")
+        else:
+            self.status_pill.setText("Running")
+            self.status_pill.setStyleSheet("background-color: #8aadf4; color: #1e2030; border-radius: 15px; font-weight: bold;")
+        self.dashboard_tab.set_paused(is_paused)
+
+    def _on_harvest_reset(self):
+        """Called when user presses New Harvest — reset sidebar pill and dashboard status to Idle."""
+        self.status_pill.setText("Idle")
+        self.status_pill.setStyleSheet("background-color: #363a4f; color: #d4daf2; border-radius: 15px; font-weight: bold;")
+        self.dashboard_tab.set_idle()
 
     def closeEvent(self, event):
         if self.harvest_tab.is_running:
@@ -539,7 +528,6 @@ class ModernMainWindow(QMainWindow):
                 return
             self.harvest_tab.stop_harvest()
         event.accept()
-
     def _apply_theme(self, theme: str):
         """Apply color theme (light or dark) dynamically generated from styles_v2.
 
