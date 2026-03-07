@@ -189,6 +189,7 @@ class TargetDialog(QDialog):
     def _apply_styles(self):
         """Apply theme-aware styles for both dark and light modes."""
         mode = ThemeManager().get_theme()
+        icons_dir = (Path(__file__).parent / "icons").as_posix()
         if mode == "dark":
             self.setStyleSheet(
                 """
@@ -249,7 +250,7 @@ class TargetDialog(QDialog):
                 QPushButton#DangerButton:hover {
                     background-color: #d97082;
                 }
-            """
+            """.replace("url(src/gui/icons/", f"url({icons_dir}/")
             )
         else:
             self.setStyleSheet(
@@ -311,7 +312,7 @@ class TargetDialog(QDialog):
                 QPushButton#DangerButton:hover {
                     background-color: #b91c1c;
                 }
-            """
+            """.replace("url(src/gui/icons/", f"url({icons_dir}/")
             )
 
 
@@ -321,6 +322,7 @@ class TargetsTabV2(QWidget):
     """
 
     targets_changed = pyqtSignal(list)
+    profile_selected = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
@@ -397,25 +399,9 @@ class TargetsTabV2(QWidget):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(16)
 
-        # Header
-        header_layout = QHBoxLayout()
-        title = QLabel("Target Management")
-        title.setProperty("class", "CardTitle")
-        title.setStyleSheet("font-size: 20px; font-weight: bold;")
-        header_layout.addWidget(title)
-        header_layout.addStretch()
-        layout.addLayout(header_layout)
-
-        # Info banner
-        built_in_label = QLabel(
-            "Built-in APIs: Library of Congress API, Harvard Library API, OpenLibrary API"
-        )
-        built_in_label.setWordWrap(True)
-        built_in_label.setProperty("class", "Banner")
-        layout.addWidget(built_in_label)
-
-        # Action buttons row
+        # Action buttons row (includes profile selector)
         btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(8)
 
         self.btn_add = QPushButton("Add New Target")
         self.btn_add.setObjectName("PrimaryButton")
@@ -426,6 +412,16 @@ class TargetsTabV2(QWidget):
         self.btn_check_servers.setObjectName("SecondaryButton")
         self.btn_check_servers.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.btn_check_servers.clicked.connect(self.check_all_servers)
+
+        profile_label = QLabel("Profile:")
+        profile_label.setObjectName("FormLabel")
+
+        self.profile_combo = QComboBox()
+        self.profile_combo.setMinimumWidth(150)
+        self.profile_combo.setMaximumWidth(220)
+        self.profile_combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.profile_combo.installEventFilter(self)
+        self.profile_combo.currentTextChanged.connect(self._on_profile_combo_changed)
 
         self.search_container = QWidget()
         self.search_container.setProperty("class", "SearchContainer")
@@ -451,6 +447,9 @@ class TargetsTabV2(QWidget):
 
         btn_layout.addWidget(self.btn_add)
         btn_layout.addWidget(self.btn_check_servers)
+        btn_layout.addSpacing(16)
+        btn_layout.addWidget(profile_label)
+        btn_layout.addWidget(self.profile_combo)
         btn_layout.addStretch()
         btn_layout.addWidget(self.search_container)
 
@@ -482,11 +481,27 @@ class TargetsTabV2(QWidget):
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         # Table inherits global stylesheet
 
-        self.table.itemDoubleClicked.connect(lambda _item: self.edit_target())
+        self.table.itemDoubleClicked.connect(lambda item: self._edit_target_from_item(item))
 
         # Ensure the table always shows a reasonable minimum height
         self.table.setMinimumHeight(200)
         layout.addWidget(self.table)
+
+    def set_profile_options(self, profiles: list, current: str):
+        """Populate the profile combo box without triggering a profile switch."""
+        self.profile_combo.blockSignals(True)
+        self.profile_combo.clear()
+        for p in profiles:
+            self.profile_combo.addItem(p)
+        idx = self.profile_combo.findText(current)
+        if idx >= 0:
+            self.profile_combo.setCurrentIndex(idx)
+        self.profile_combo.blockSignals(False)
+
+    def _on_profile_combo_changed(self, name: str):
+        """Emit profile_selected when the user picks a different profile."""
+        if name:
+            self.profile_selected.emit(name)
 
     def _emit_targets_changed(self):
         self.targets_changed.emit(self.get_targets())
@@ -560,7 +575,7 @@ class TargetsTabV2(QWidget):
         for row, target in enumerate(targets):
             rank_combo = QComboBox()
             rank_combo.setFixedHeight(36)
-            pass  # rank combo inherits global styled combo box
+            rank_combo.setObjectName("RankCombo")
             for i in range(1, len(targets) + 1):
                 rank_combo.addItem(str(i), i)
             # Set current rank using userData (robust)
@@ -832,6 +847,15 @@ class TargetsTabV2(QWidget):
                 )
 
         self.refresh_targets()
+
+    def _edit_target_from_item(self, item):
+        """Edit the target corresponding to the double-clicked table item."""
+        row = item.row()
+        name_item = self.table.item(row, 2)  # Name column
+        if name_item:
+            target = name_item.data(Qt.ItemDataRole.UserRole)
+            if target:
+                self._edit_specific_target(target)
 
     def _get_selected_target(self):
         row = self.table.currentRow()
