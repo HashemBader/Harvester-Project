@@ -61,17 +61,24 @@ def pymarc_record_to_json(record: Any) -> Dict[str, List[Dict[str, Any]]]:
             if not field_objs:
                 continue
 
-            # Prefer ind2='0' (assigned by LC); fall back to first occurrence
+            # Prefer ind2='0' (assigned by LC) but only among occurrences
+            # that actually yield usable subfields. Fall back to other
+            # occurrences in order until one with data is found.
             preferred = None
-            for fo in field_objs:
-                if getattr(fo, 'indicator2', None) == '0':
-                    preferred = fo
-                    break
-            if preferred is None:
-                preferred = field_objs[0]
+            subfields_list = None
 
-            subfields_list = _extract_subfields_from_pymarc_field(preferred)
-            if subfields_list:
+            lc_assigned = [fo for fo in field_objs if getattr(fo, "indicator2", None) == "0"]
+            others = [fo for fo in field_objs if getattr(fo, "indicator2", None) != "0"]
+            preferred_candidates = lc_assigned + others
+
+            for fo in preferred_candidates:
+                subfields = _extract_subfields_from_pymarc_field(fo)
+                if subfields:
+                    preferred = fo
+                    subfields_list = subfields
+                    break
+
+            if preferred is not None and subfields_list:
                 fields.append({
                     field_tag: {
                         "subfields": subfields_list,
