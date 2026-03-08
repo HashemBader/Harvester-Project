@@ -67,10 +67,10 @@ def is_valid_lccn(call_number: str) -> bool:
     if not remainder[0].isdigit():
         return False
 
-    # Collect leading digits (1-3)
+    # Collect leading digits (up to 4, matching the LC classification schedule)
     j = 0
     digit_count = 0
-    while j < len(remainder) and remainder[j].isdigit() and digit_count < 3:
+    while j < len(remainder) and remainder[j].isdigit() and digit_count < 4:
         digit_count += 1
         j += 1
 

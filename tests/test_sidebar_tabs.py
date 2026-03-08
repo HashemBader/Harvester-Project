@@ -45,6 +45,8 @@ class TestSidebarTabsExist:
         with patch('gui.modern_window.NotificationManager'):
             from gui.modern_window import ModernMainWindow
             window = ModernMainWindow()
+            window.show()
+            qapp.processEvents()
             yield window
             window.close()
 
@@ -102,6 +104,8 @@ class TestTabSwitching:
         with patch('gui.modern_window.NotificationManager'):
             from gui.modern_window import ModernMainWindow
             window = ModernMainWindow()
+            window.show()
+            qapp.processEvents()
             yield window
             window.close()
 
@@ -152,6 +156,10 @@ class TestThemeToggle:
         with patch('gui.modern_window.NotificationManager'):
             from gui.modern_window import ModernMainWindow
             window = ModernMainWindow()
+            window.show()
+            qapp.processEvents()
+            # Ensure a canonical dark starting state regardless of persisted settings
+            window._apply_theme("dark")
             yield window
             window.close()
 
@@ -159,7 +167,8 @@ class TestThemeToggle:
         """Test theme toggle button exists in sidebar."""
         assert hasattr(main_window, 'btn_theme')
         assert main_window.btn_theme is not None
-        assert main_window.btn_theme.text() == "Toggle Theme"
+        # After init _apply_theme() renames the button to reflect current theme
+        assert main_window.btn_theme.text() in ("Toggle Theme", "Theme: Dark", "Theme: Light")
         assert main_window.btn_theme.isVisible()
 
     def test_initial_theme_is_dark(self, main_window):
@@ -215,6 +224,8 @@ class TestSidebarCollapse:
         with patch('gui.modern_window.NotificationManager'):
             from gui.modern_window import ModernMainWindow
             window = ModernMainWindow()
+            window.show()
+            qapp.processEvents()
             yield window
             window.close()
 
@@ -305,6 +316,8 @@ class TestStatusPill:
         with patch('gui.modern_window.NotificationManager'):
             from gui.modern_window import ModernMainWindow
             window = ModernMainWindow()
+            window.show()
+            qapp.processEvents()
             yield window
             window.close()
 

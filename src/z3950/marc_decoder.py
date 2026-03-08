@@ -51,21 +51,41 @@ def pymarc_record_to_json(record: Any) -> Dict[str, List[Dict[str, Any]]]:
 
     fields = []
 
-    # Extract MARC fields 050 (LCCN) and 060 (NLMCN)
+    # Extract MARC fields 050 (LCCN) and 060 (NLMCN).
+    # When multiple occurrences exist, prefer the LC-assigned one (ind2='0')
+    # over institution copies (ind2='4' or blank) to avoid mixing $b values
+    # from different field occurrences during normalization.
     for field_tag in ("050", "060"):
         try:
             field_objs = record.get_fields(field_tag)
-            if field_objs:
-                for field_obj in field_objs:
-                    subfields_list = _extract_subfields_from_pymarc_field(field_obj)
-                    if subfields_list:
-                        fields.append({
-                            field_tag: {
-                                "subfields": subfields_list,
-                                "ind1": getattr(field_obj, "indicator1", None),
-                                "ind2": getattr(field_obj, "indicator2", None),
-                            }
-                        })
+            if not field_objs:
+                continue
+
+            # Prefer ind2='0' (assigned by LC) but only among occurrences
+            # that actually yield usable subfields. Fall back to other
+            # occurrences in order until one with data is found.
+            preferred = None
+            subfields_list = None
+
+            lc_assigned = [fo for fo in field_objs if getattr(fo, "indicator2", None) == "0"]
+            others = [fo for fo in field_objs if getattr(fo, "indicator2", None) != "0"]
+            preferred_candidates = lc_assigned + others
+
+            for fo in preferred_candidates:
+                subfields = _extract_subfields_from_pymarc_field(fo)
+                if subfields:
+                    preferred = fo
+                    subfields_list = subfields
+                    break
+
+            if preferred is not None and subfields_list:
+                fields.append({
+                    field_tag: {
+                        "subfields": subfields_list,
+                        "ind1": getattr(preferred, "indicator1", None),
+                        "ind2": getattr(preferred, "indicator2", None),
+                    }
+                })
         except Exception as e:
             logger.debug(f"Error extracting field {field_tag}: {e}")
 
@@ -85,21 +105,24 @@ def _extract_subfields_from_pymarc_field(field: Any) -> List[Dict[str, str]]:
     -------
     list[dict[str, str]]
         List of subfield dictionaries like [{"a": "value"}, {"b": "value"}]
+
+    Notes
+    -----
+    pymarc >= 5.0 stores subfields as a list of Subfield(code, value) namedtuples.
+    The old flat alternating-list format [code, val, code, val, ...] was removed in
+    pymarc 5.1 — Field.__init__ now raises ValueError when strings are passed.
+    All real pymarc Field objects (including those produced by Record(data=...)
+    via the Z39.50 client) therefore always use the namedtuple format.
     """
     subfields_list = []
 
     try:
-        # pymarc Field objects have a subfields property that contains alternating
-        # subfield codes and values: [code1, value1, code2, value2, ...]
         if hasattr(field, 'subfields'):
-            subfields_pairs = field.subfields
-            # Process pairs of (code, value)
-            for i in range(0, len(subfields_pairs), 2):
-                if i + 1 < len(subfields_pairs):
-                    code = subfields_pairs[i]
-                    value = subfields_pairs[i + 1]
-                    if code and value:
-                        subfields_list.append({code: value.strip() if isinstance(value, str) else str(value)})
+            for sf in field.subfields:
+                code = sf.code
+                value = sf.value
+                if code and value:
+                    subfields_list.append({code: value.strip() if isinstance(value, str) else str(value)})
     except Exception as e:
         logger.debug(f"Error extracting subfields: {e}")
 
