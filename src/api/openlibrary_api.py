@@ -75,18 +75,9 @@ class OpenLibraryApiClient(BaseApiClient):
             if isinstance(alt, list) and alt:
                 lccn = str(alt[0]).strip() or None
 
-        # Check top-level lccn field (LCCN identifier, e.g., "2001016794")
-        if not lccn:
-            top_level_lccn = payload.get("lccn", [])
-            if isinstance(top_level_lccn, list) and top_level_lccn:
-                lccn = str(top_level_lccn[0]).strip() or None
-
-        # Fallback: identifiers.lccn (not shelf call number, but better than empty).
-        identifiers = payload.get("identifiers", {})
-        if not lccn and isinstance(identifiers, dict):
-            lccn_values = identifiers.get("lccn", [])
-            if isinstance(lccn_values, list) and lccn_values:
-                lccn = str(lccn_values[0]).strip() or None
+        # Note: OpenLibrary's top-level "lccn" field and identifiers.lccn are
+        # LC control numbers (MARC 010, e.g. "2001016794"), NOT LC classification
+        # call numbers (MARC 050).  We do not fall back to those.
 
         # Validate extracted call numbers
         lccn = validate_lccn(lccn, source=self.source)
