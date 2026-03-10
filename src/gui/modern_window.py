@@ -77,9 +77,9 @@ class ModernMainWindow(QMainWindow):
         self._setup_layout()
         self._apply_advanced_mode()
 
-        # Apply User's Saved Theme
+        # Always start in light mode on launch
         try:
-            self._apply_theme(self._theme_manager.get_theme())
+            self._apply_theme("light")
         except Exception as e:
             print("Theme generation fallback tripped:", e)
             self.setStyleSheet(V2_STYLESHEET)

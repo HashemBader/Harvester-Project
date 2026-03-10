@@ -289,12 +289,7 @@ class DashboardTabV2(QWidget):
         self.btn_open_profile_folder.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_open_profile_folder.setFixedSize(42, 42)
         self.btn_open_profile_folder.setToolTip("Open this profile's results folder")
-        self.btn_open_profile_folder.setStyleSheet(
-            "QPushButton { background-color: #2a3144; color: #f4c542; border: 1px solid #5a647d; border-radius: 10px; }"
-            "QPushButton:hover { background-color: #343d55; border: 1px solid #f4c542; }"
-            "QPushButton:pressed { background-color: #20283a; }"
-            "QPushButton:disabled { background-color: #252b38; color: #7b7043; border: 1px solid #4a4f5c; }"
-        )
+        self.btn_open_profile_folder.setProperty("class", "IconButton")
         self.btn_open_profile_folder.clicked.connect(self._open_profile_folder)
         header.addWidget(self.btn_open_profile_folder)
         layout.addLayout(header)
