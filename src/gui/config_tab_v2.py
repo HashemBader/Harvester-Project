@@ -312,33 +312,16 @@ class ConfigTabV2(QWidget):
 
         form_layout.addLayout(retry_pair)
         form_layout.addLayout(mode_pair)
-        form_layout.addLayout(mode_pair)
-        
-        # Stop Rule Selection
-        self.stop_rule_lbl = QLabel("Stop &Rule")
-        self.stop_rule_lbl.setStyleSheet("")
 
+        # Stop Rule is shown in the Harvester tab, not here.
+        # Keep a hidden widget so _load_profile / get_config / _save_current_profile
+        # can still read/write the stop_rule setting without extra changes.
         self.stop_rule_combo = QComboBox()
-        self.stop_rule_combo.setFixedWidth(180)
-        self.stop_rule_combo.setAccessibleName("Stop rule selection")
-        self.stop_rule_combo.setToolTip("Choose when to stop scraping targets for a single ISBN")
         self.stop_rule_combo.addItem("Stop if either found", "stop_either")
         self.stop_rule_combo.addItem("Stop if LCCN found", "stop_lccn")
         self.stop_rule_combo.addItem("Stop if NLMCN found", "stop_nlmcn")
         self.stop_rule_combo.addItem("Continue until both found", "continue_both")
-        self.stop_rule_combo.currentTextChanged.connect(self._on_setting_changed)
-        self.stop_rule_lbl.setBuddy(self.stop_rule_combo)
-
-        self.stop_rule_pair = QHBoxLayout()
-        self.stop_rule_pair.setSpacing(8)
-        self.stop_rule_pair.addWidget(self.stop_rule_lbl)
-        self.stop_rule_pair.addWidget(self.stop_rule_combo)
-
-        # Toggle visibility
-        self.call_number_combo.currentTextChanged.connect(self._toggle_stop_rule_visibility)
-        self._toggle_stop_rule_visibility()
-
-        form_layout.addLayout(self.stop_rule_pair)
+        self.stop_rule_combo.hide()  # not shown in the Config tab UI
 
         form_layout.addStretch()
         
@@ -348,9 +331,8 @@ class ConfigTabV2(QWidget):
         layout.addStretch()
 
     def _toggle_stop_rule_visibility(self):
-        is_both = self.call_number_combo.currentData() == "both"
-        self.stop_rule_lbl.setVisible(is_both)
-        self.stop_rule_combo.setVisible(is_both)
+        """No-op: Stop Rule is now shown in the Harvester tab."""
+        pass
 
     def refresh_targets_preview(self, targets=None):
         """No-op stub — targets are now shown in the live TargetsTabV2 below."""

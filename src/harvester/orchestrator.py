@@ -364,7 +364,6 @@ class HarvestOrchestrator:
         def flush() -> None:
             """Flush buffered DB writes in a single transaction."""
             wrote_main = len(pending_main)
-            wrote_attempted = len(pending_attempted)
             if dry_run:
                 pending_main.clear()
                 pending_attempted.clear()
@@ -373,9 +372,20 @@ class HarvestOrchestrator:
             if not pending_main and not pending_attempted:
                 return
 
+            # ISBNs that succeeded in this batch — don't write failure rows for them.
+            # upsert_main_many already clears old attempted rows via clear_attempted_on_success,
+            # but without this filter upsert_attempted_many would immediately re-insert the
+            # intermediate per-target failures recorded before the early-stop success hit.
+            successful_isbns = {r.isbn for r in pending_main}
+            filtered_attempted = [
+                row for row in pending_attempted if row[0] not in successful_isbns
+            ]
+
+            wrote_attempted = len(filtered_attempted)
+
             with self.db.transaction() as conn:
                 self.db.upsert_main_many(conn, pending_main, clear_attempted_on_success=True)
-                self.db.upsert_attempted_many(conn, pending_attempted)
+                self.db.upsert_attempted_many(conn, filtered_attempted)
 
             pending_main.clear()
             pending_attempted.clear()
@@ -449,6 +459,11 @@ class HarvestOrchestrator:
                 skipped_retry_targets: list[str] = []
                 attempted_rows: list[tuple[str, Optional[str], str, Optional[str], Optional[str]]] = []
 
+                # Accumulate best results and apply stop_rule (mirrors process_isbn)
+                best_lccn: Optional[str] = None
+                best_nlmcn: Optional[str] = None
+                best_source: Optional[str] = None
+
                 for target in self.targets:
                     self._check_cancelled()
                     last_target = getattr(target, "name", target.__class__.__name__)
@@ -466,23 +481,33 @@ class HarvestOrchestrator:
 
                     result = self._filter_result_by_mode(target.lookup(isbn))
                     if result.success:
-                        self._emit("success", {
-                            "isbn": isbn,
-                            "target": last_target,
-                            "source": result.source or last_target,
-                            "lccn": result.lccn,
-                            "nlmcn": result.nlmcn,
-                        })
+                        if result.lccn and not best_lccn:
+                            best_lccn = result.lccn
+                            if not best_source:
+                                best_source = result.source or last_target
+                        if result.nlmcn and not best_nlmcn:
+                            best_nlmcn = result.nlmcn
+                            if not best_source:
+                                best_source = result.source or last_target
 
-                        rec = None
-                        if not dry_run:
-                            rec = MainRecord(
-                                isbn=isbn,
-                                lccn=result.lccn,
-                                nlmcn=result.nlmcn,
-                                source=result.source or last_target,
-                            )
-                        return ("success", rec, None)
+                        should_stop = False
+                        if self.call_number_mode == "both":
+                            if self.stop_rule == "stop_either":
+                                should_stop = True
+                            elif self.stop_rule == "stop_lccn" and best_lccn:
+                                should_stop = True
+                            elif self.stop_rule == "stop_nlmcn" and best_nlmcn:
+                                should_stop = True
+                            elif self.stop_rule == "continue_both" and best_lccn and best_nlmcn:
+                                should_stop = True
+                        else:
+                            should_stop = True
+
+                        if should_stop:
+                            break
+
+                        # Not stopping yet — continue to next target for the missing counterpart.
+                        continue
 
                     last_error = result.error or "Unknown error"
                     err = (result.error or "").strip()
@@ -492,6 +517,25 @@ class HarvestOrchestrator:
                         other_errors.append((last_target, err))
                     if not dry_run:
                         attempted_rows.append((isbn, last_target, self.call_number_mode, utc_now_iso(), last_error))
+
+                if best_lccn or best_nlmcn:
+                    self._emit("success", {
+                        "isbn": isbn,
+                        "target": best_source,
+                        "source": best_source,
+                        "lccn": best_lccn,
+                        "nlmcn": best_nlmcn,
+                    })
+                    rec = None
+                    if not dry_run:
+                        rec = MainRecord(
+                            isbn=isbn,
+                            lccn=best_lccn,
+                            nlmcn=best_nlmcn,
+                            source=best_source,
+                        )
+                    # Don't pass attempted_rows — successes drop intermediate failures
+                    return ("success", rec, None)
 
                 if skipped_retry_targets and not not_found_targets and not other_errors:
                     self._emit(
