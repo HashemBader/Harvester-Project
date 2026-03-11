@@ -105,8 +105,8 @@ class HarvestOrchestrator:
         self.progress_cb = progress_cb
         self.cancel_check = cancel_check
         self.call_number_mode = self._normalize_call_number_mode(call_number_mode)
-        self.stop_rule = stop_rule
         self.both_stop_policy = self._normalize_both_stop_policy(both_stop_policy)
+        self.stop_rule = stop_rule
         self.max_workers = max(1, int(max_workers))
         self.executor = ThreadPoolExecutor(max_workers=self.max_workers)    
 
@@ -386,6 +386,7 @@ class HarvestOrchestrator:
 
                 if should_stop:
                     break
+                continue
 
             # failure from this target; continue
             last_error = result.error or "Unknown error"
