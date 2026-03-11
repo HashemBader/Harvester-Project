@@ -146,17 +146,6 @@ class ModernMainWindow(QMainWindow):
 
         sidebar_layout.addStretch() # Spacer
 
-        # Clean "Status Pill"
-        self.status_pill = QLabel("Idle")
-        self.status_pill.setObjectName("StatusPill") # Matches styles_v2
-        self.status_pill.setProperty("class", "StatusPill") # Helper for some qt styles
-        self.status_pill.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_pill.setProperty("state", "idle")
-        
-        status_frame = QWidget()
-        status_layout = QHBoxLayout(status_frame)
-        status_layout.addWidget(self.status_pill)
-        sidebar_layout.addWidget(status_frame)
 
         # Theme toggle button (bottom, like Accessibility)
         self.btn_theme = QPushButton("Toggle Theme")
@@ -246,7 +235,6 @@ class ModernMainWindow(QMainWindow):
             btn.setAccessibleName(f"Open {label} page")
             btn.setToolTip(f"Open {label}")
 
-        self.status_pill.setAccessibleName("Application status")
 
     def _setup_shortcuts(self):
         mod = self._shortcut_modifier
@@ -331,10 +319,10 @@ class ModernMainWindow(QMainWindow):
 
         icon = SVG_CHEVRON_RIGHT if collapsed else SVG_CHEVRON_LEFT
         self.toggle_btn.setIcon(get_icon(icon, "#8aadf4"))
-
-        self.title_label.setVisible(not collapsed)
-        self.status_pill.setVisible(not collapsed)
-
+        
+        # Update Text Visibility
+        self.title_label.setVisible(not self.sidebar_collapsed)
+        
         for btn in self.nav_group.buttons():
             if collapsed:
                 btn.setText("")
@@ -376,6 +364,7 @@ class ModernMainWindow(QMainWindow):
         
         # Live Dashboard Updates
         self.harvest_tab.progress_updated.connect(self._on_harvest_progress)
+        self.harvest_tab.live_result_ready.connect(self._on_live_result)
         # Live stats streaming - bypasses DB with RunStats object
         if hasattr(self.harvest_tab, 'live_stats_ready'):
             self.harvest_tab.live_stats_ready.connect(self.dashboard_tab.update_live_stats)
@@ -398,6 +387,15 @@ class ModernMainWindow(QMainWindow):
         # Keep tab state fresh when navigating
         self.stack.currentChanged.connect(self._on_page_changed)
         self.help_tab.open_accessibility_requested.connect(self._show_accessibility_statement)
+
+    def _on_live_result(self, payload: dict):
+        """Pass real-time structured results directly into the dashboard table."""
+        if hasattr(self.dashboard_tab, '_append_recent_result'):
+            self.dashboard_tab._append_recent_result(
+                isbn=payload.get("isbn", ""),
+                status=payload.get("status", ""),
+                detail=payload.get("detail", "")
+            )
 
     def _on_harvest_progress(self, isbn, status, source, message):
         """Pass real-time harvest events to dashboard."""
@@ -509,23 +507,34 @@ class ModernMainWindow(QMainWindow):
 
 
     def _on_harvest_finished(self, success, stats):
+        from datetime import datetime
         is_cancelled = isinstance(stats, dict) and stats.get("cancelled", False)
         has_error = isinstance(stats, dict) and bool(stats.get("error"))
         if success:
             self._set_sidebar_status("Completed", "success")
+            outcome = "Completed"
         elif is_cancelled:
             self._set_sidebar_status("Cancelled", "error")
+            outcome = "Cancelled"
         elif has_error:
             self._set_sidebar_status("Error", "error")
+            outcome = "Error"
         else:
             self._set_sidebar_status("Failed", "error")
+            outcome = "Failed"
+
+        # Update "Last Run" with a real timestamp
+        ts = datetime.now().strftime("%H:%M:%S")
+        self.dashboard_tab.last_run_text = f"Last Run: {ts} – {outcome}"
+        self.dashboard_tab.lbl_last_run.setText(self.dashboard_tab.last_run_text)
+
         self.dashboard_tab.refresh_data()
         self.dashboard_tab.apply_run_stats(stats if isinstance(stats, dict) else {})
-        
+
         if isinstance(stats, dict) and not stats.get("cancelled", False) and not success:
             error_msg = stats.get("error", "Harvest stopped or failed") if isinstance(stats, dict) else "Harvest stopped or failed"
             self.notification_manager.notify_harvest_error(error_msg)
-            
+
         self.dashboard_tab.set_idle(success)
 
     def _on_harvest_paused(self, is_paused: bool):
@@ -539,16 +548,11 @@ class ModernMainWindow(QMainWindow):
     def _on_harvest_reset(self):
         """Called when user presses New Harvest — reset sidebar pill and dashboard status to Idle."""
         self._set_sidebar_status("Idle", "idle")
-        self.dashboard_tab.reset_dashboard_stats()
         self.dashboard_tab.set_idle()
 
     def _set_sidebar_status(self, text: str, state: str):
-        """Apply status via shared stylesheet states instead of ad-hoc inline styles."""
-        self.status_pill.setText(text)
-        self.status_pill.setProperty("state", state)
-        self.status_pill.setStyleSheet("")
-        self.status_pill.style().unpolish(self.status_pill)
-        self.status_pill.style().polish(self.status_pill)
+        """No-op: sidebar status pill has been removed (Dashboard header and Harvester banner cover this)."""
+        pass
 
     def closeEvent(self, event):
         if self.harvest_tab.is_running:

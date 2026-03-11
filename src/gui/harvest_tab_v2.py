@@ -312,7 +312,7 @@ class HarvestWorkerV2(QThread):
                 cancel_check=lambda: self._check_cancel_and_pause(),
                 max_workers=max_workers,
                 call_number_mode=call_number_mode,
-                both_stop_policy=self.config.get("both_stop_policy", "both"),
+                stop_rule=self.config.get("stop_rule", "stop_either"),
             )
 
             # Final stats
@@ -914,6 +914,37 @@ class HarvestTabV2(QWidget):
             self.combo_run_mode.setCurrentText("LCCN Only")
         setup_grid.addWidget(lbl_run_mode, 1, 0)
         setup_grid.addWidget(self.combo_run_mode, 1, 1)
+
+        # Stop rule row (conditionally visible)
+        self.lbl_stop_rule = QLabel("Stop Rule:")
+        self.lbl_stop_rule.setProperty("class", "HelperText")
+        self.combo_stop_rule = QComboBox()
+        self.combo_stop_rule.setProperty("class", "ComboBox")
+        self.combo_stop_rule.addItems([
+            "Stop if either found", 
+            "Stop if LCCN found", 
+            "Stop if NLMCN found", 
+            "Continue until both found"
+        ])
+        
+        # Load from config, default to Stop if either
+        if hasattr(self, "_config_getter") and callable(self._config_getter):
+            saved_stop = config.get("stop_rule", "stop_either")
+            mapping = {
+                "stop_either": "Stop if either found",
+                "stop_lccn": "Stop if LCCN found",
+                "stop_nlmcn": "Stop if NLMCN found",
+                "continue_both": "Continue until both found"
+            }
+            self.combo_stop_rule.setCurrentText(mapping.get(saved_stop, "Stop if either found"))
+            
+        setup_grid.addWidget(self.lbl_stop_rule, 2, 0)
+        setup_grid.addWidget(self.combo_stop_rule, 2, 1)
+
+        self.combo_run_mode.currentTextChanged.connect(self._toggle_stop_rule_visibility)
+        self._toggle_stop_rule_visibility(self.combo_run_mode.currentText())
+
+        # Add the grid (file input + run mode + stop rule) to the card layout
         input_layout.addLayout(setup_grid)
 
         # Thin separator between setup and stats
@@ -1130,6 +1161,36 @@ class HarvestTabV2(QWidget):
         self._transition_state(UIState.IDLE)
 
 
+
+    def _toggle_stop_rule_visibility(self, mode_text=None):
+        if not mode_text:
+            mode_text = self.combo_run_mode.currentText()
+
+        is_both = mode_text == "Both (LCCN & NLM)"
+        self.lbl_stop_rule.setEnabled(is_both)
+        self.combo_stop_rule.setEnabled(is_both)
+
+        if is_both:
+            # Restore normal theme appearance
+            self.lbl_stop_rule.setStyleSheet("")
+            self.combo_stop_rule.setStyleSheet("")
+            self.combo_stop_rule.setCursor(Qt.CursorShape.ArrowCursor)
+        else:
+            # Visually mute — grey text, faded background, blocked cursor
+            muted_label = "color: rgba(120, 120, 140, 0.55); font-size: 11px;"
+            muted_combo = (
+                "QComboBox {"
+                "  color: rgba(120, 120, 140, 0.55);"
+                "  background: rgba(100, 100, 120, 0.10);"
+                "  border: 1px solid rgba(120, 120, 140, 0.20);"
+                "  border-radius: 6px;"
+                "}"
+                "QComboBox::drop-down { border: none; }"
+                "QComboBox::down-arrow { opacity: 0.3; }"
+            )
+            self.lbl_stop_rule.setStyleSheet(muted_label)
+            self.combo_stop_rule.setStyleSheet(muted_combo)
+            self.combo_stop_rule.setCursor(Qt.CursorShape.ForbiddenCursor)
 
     def _transition_state(self, state: UIState, **kwargs):
         """Unified UI state machine handling buttons, banners, and status."""
@@ -1430,7 +1491,6 @@ class HarvestTabV2(QWidget):
         self.progress_bar.setProperty("state", "idle")
         self.progress_bar.style().unpolish(self.progress_bar)
         self.progress_bar.style().polish(self.progress_bar)
-        self.lbl_run_progress.setText("0 / 0")
 
         self._transition_state(UIState.IDLE)
         self.harvest_reset.emit()
@@ -1503,6 +1563,16 @@ class HarvestTabV2(QWidget):
             config["call_number_mode"] = "nlmcn"
         elif mode_text == "Both (LCCN & NLM)":
             config["call_number_mode"] = "both"
+            
+            # Map stop rule dropdown back to internal identifier
+            stop_text = self.combo_stop_rule.currentText()
+            stop_mapping = {
+                "Stop if either found": "stop_either",
+                "Stop if LCCN found": "stop_lccn",
+                "Stop if NLMCN found": "stop_nlmcn",
+                "Continue until both found": "continue_both"
+            }
+            config["stop_rule"] = stop_mapping.get(stop_text, "stop_either")
         else:
             config["call_number_mode"] = "lccn"
         if config["call_number_mode"] == "both":
@@ -1513,7 +1583,6 @@ class HarvestTabV2(QWidget):
             config["both_stop_policy"] = both_stop_policy
         else:
             config["both_stop_policy"] = config["call_number_mode"]
-
 
         # 2. Get Targets
         targets = self._targets_getter() if self._targets_getter else []

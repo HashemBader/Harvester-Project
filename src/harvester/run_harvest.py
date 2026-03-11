@@ -110,7 +110,7 @@ def run_harvest(
     cancel_check: CancelCheck | None = None,
     max_workers: int = 1,
     call_number_mode: str = "both",
-    both_stop_policy: str = "both",
+    stop_rule: str = "stop_either",
     include_z3950: bool = False,
 ) -> HarvestSummary:
 
@@ -139,7 +139,7 @@ def run_harvest(
         cancel_check=cancel_check,
         max_workers=max_workers,
         call_number_mode=call_number_mode,
-        both_stop_policy=both_stop_policy,
+        stop_rule=stop_rule,
     )
 
     orch_summary = orch.run(isbns, dry_run=dry_run)
