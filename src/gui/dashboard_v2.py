@@ -206,8 +206,10 @@ class DashboardTabV2(QWidget):
         _scroll.setWidgetResizable(True)
         _scroll.setFrameShape(QFrame.Shape.NoFrame)
         _scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
-        _scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        _scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        _scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         _scr_content = QWidget()
+        _scr_content.setMinimumWidth(700)  # cards never compress below this
         _scroll.setWidget(_scr_content)
         _outer.addWidget(_scroll)
         main_layout = QVBoxLayout(_scr_content)
@@ -237,9 +239,13 @@ class DashboardTabV2(QWidget):
         self.kpi_layout.setSpacing(20)
 
         self.card_proc = DashboardCard("PROCESSED", SVG_ACTIVITY, "#8aadf4")
+        self.card_proc.setMinimumWidth(160)
         self.card_found = DashboardCard("SUCCESSFUL", SVG_CHECK_CIRCLE, "#a6da95")
+        self.card_found.setMinimumWidth(160)
         self.card_failed = DashboardCard("FAILED", SVG_X_CIRCLE, "#ed8796")
+        self.card_failed.setMinimumWidth(160)
         self.card_invalid = DashboardCard("INVALID", SVG_ALERT_CIRCLE, "#fab387")
+        self.card_invalid.setMinimumWidth(160)
         
         main_layout.addLayout(self.kpi_layout)
 
@@ -258,12 +264,14 @@ class DashboardTabV2(QWidget):
         # Right: Recent Results (60%)
         self.recent_panel = RecentResultsPanel()
         self.recent_panel.setMinimumWidth(320)
+        self.recent_panel.setMinimumHeight(280)  # stays visible when stacked in compact mode
         self.content_split.addWidget(self.recent_panel, stretch=3)
         
         main_layout.addLayout(self.content_split)
         
         main_layout.addStretch()
-        self._apply_responsive_layout(max(self.width(), 1200))
+        # Use actual widget width; fall back to wide default on first paint
+        self._apply_responsive_layout(self.width() or 1200)
         self._refresh_result_file_buttons()
 
     def resizeEvent(self, event):
@@ -271,7 +279,7 @@ class DashboardTabV2(QWidget):
         self._apply_responsive_layout(event.size().width())
 
     def _apply_responsive_layout(self, width: int):
-        mode = "compact" if width < 1180 else "wide"
+        mode = "compact" if width < 900 else "wide"
         if mode == self._responsive_mode:
             return
         self._responsive_mode = mode
@@ -314,6 +322,14 @@ class DashboardTabV2(QWidget):
         header.addWidget(title)
         header.addStretch()
 
+        # Format Switch
+        self.format_combo = QComboBox()
+        self.format_combo.addItems(["TSV (.tsv)", "Excel (.xlsx)"])
+        self.format_combo.setProperty("class", "ComboBox")
+        self.format_combo.setToolTip("Select the file format to open")
+        self.format_combo.currentTextChanged.connect(self._refresh_result_file_buttons)
+        header.addWidget(self.format_combo)
+        
         self.btn_open_profile_folder = QPushButton()
         self.btn_open_profile_folder.setIcon(get_icon(SVG_FOLDER_OPEN, "#f4c542"))
         self.btn_open_profile_folder.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -324,17 +340,18 @@ class DashboardTabV2(QWidget):
         header.addWidget(self.btn_open_profile_folder)
         layout.addLayout(header)
 
-        subtitle = QLabel("Live TSV files are created fresh for each harvest run.")
+        subtitle = QLabel("Live results are created fresh for each harvest run.")
         subtitle.setProperty("class", "HelperText")
         layout.addWidget(subtitle)
 
-        self.btn_open_successful = self._create_result_open_button("Open successful.tsv", "successful")
-        self.btn_open_failed = self._create_result_open_button("Open failed.tsv", "failed")
-        self.btn_open_invalid = self._create_result_open_button("Open invalid.tsv", "invalid")
+        self.btn_open_successful = self._create_result_open_button("Open successful", "successful")
+        self.btn_open_failed = self._create_result_open_button("Open failed", "failed")
+        self.btn_open_invalid = self._create_result_open_button("Open invalid", "invalid")
         self.btn_open_problems = self._create_result_open_button(
-            _problems_button_label(self.current_profile, include_profile=False),
+            _problems_button_label(self.current_profile, include_profile=False).replace(".tsv", ""),
             "problems",
         )
+        
         layout.addWidget(self.btn_open_successful)
         layout.addWidget(self.btn_open_failed)
         layout.addWidget(self.btn_open_invalid)
@@ -356,6 +373,7 @@ class DashboardTabV2(QWidget):
         btn.setEnabled(False)
         btn.clicked.connect(lambda: self._open_result_file(key))
         return btn
+
 
     def set_result_files(self, paths: dict):
         """Called when a new harvest starts with the paths of the live output files."""
@@ -383,22 +401,55 @@ class DashboardTabV2(QWidget):
             "invalid": self.btn_open_invalid,
             "problems": self.btn_open_problems,
         }
+        
+        is_excel = getattr(self, "format_combo", None) and self.format_combo.currentText().startswith("Excel")
+        ext = ".xlsx" if is_excel else ".tsv"
+        
         for key, btn in mapping.items():
             path = self.result_files.get(key)
-            enabled = path is not None and path.exists()
-            btn.setEnabled(enabled)
-            btn.setText(default_labels[key])
+            if path is not None:
+                # Check for the correct extension file
+                check_path = path.with_suffix(ext)
+                
+                # If Excel is requested but not finalized, we can enable the button as long as the base TSV exists
+                # It will be generated on the fly when clicked!
+                if is_excel:
+                    enabled = path.exists() 
+                else:
+                    enabled = check_path.exists()
+                    
+                btn.setEnabled(enabled)
+                
+                # Append extension cleanly
+                base_label = default_labels[key]
+                btn.setText(f"{base_label}{ext}")
+            else:
+                btn.setEnabled(False)
         profile_dir = self.result_files.get("profile_dir") or self._profile_dir_path()
         self.btn_open_profile_folder.setEnabled(profile_dir is not None and profile_dir.exists())
 
     def _open_result_file(self, key):
         path = self.result_files[key]
-        if not path.exists():
-            QMessageBox.warning(self, "File Not Found", f"{path} does not exist yet.")
+        is_excel = getattr(self, "format_combo", None) and self.format_combo.currentText().startswith("Excel")
+        ext = ".xlsx" if is_excel else ".tsv"
+        target_path = path.with_suffix(ext)
+
+        # Generate on the fly if it's Excel mid-harvest
+        if is_excel and not target_path.exists() and path.exists():
+            try:
+                import pandas as pd
+                df = pd.read_csv(str(path), sep='\t', dtype=str)
+                df.to_excel(str(target_path), index=False, engine='openpyxl')
+            except Exception as e:
+                QMessageBox.warning(self, "Excel Not Ready", f"Could not generate live Excel view:\n{e}")
+                return
+
+        if not target_path.exists():
+            QMessageBox.warning(self, "File Not Found", f"{target_path} does not exist yet.")
             self._refresh_result_file_buttons()
             return
-        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path.resolve()))):
-            QMessageBox.warning(self, "Open Failed", f"Could not open {path}.")
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(target_path.resolve()))):
+            QMessageBox.warning(self, "Open Failed", f"Could not open {target_path}.")
 
     def _profile_dir_path(self) -> Path:
         return Path("data") / _safe_filename(self.current_profile)

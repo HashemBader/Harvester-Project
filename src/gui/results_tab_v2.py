@@ -104,6 +104,11 @@ class ResultsTabV2(QWidget):
         self.btn_export_csv.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_export_csv.clicked.connect(lambda: self._export_results("csv"))
         
+        self.btn_export_excel = QPushButton("Export Excel")
+        self.btn_export_excel.setProperty("class", "SecondaryButton")
+        self.btn_export_excel.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_export_excel.clicked.connect(lambda: self._export_results("xlsx"))
+        
         # Assemble Controls
         controls_layout.addLayout(filter_layout)
         controls_layout.addWidget(self._create_divider())
@@ -111,6 +116,7 @@ class ResultsTabV2(QWidget):
         controls_layout.addWidget(self._create_divider())
         controls_layout.addWidget(self.btn_export_tsv)
         controls_layout.addWidget(self.btn_export_csv)
+        controls_layout.addWidget(self.btn_export_excel)
 
         layout.addWidget(controls_frame)
 
@@ -333,11 +339,16 @@ class ResultsTabV2(QWidget):
 
             rows = [list(row) for row in rows_raw]
 
-            delimiter = '\t' if format_type == 'tsv' else ','
-            with open(path, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f, delimiter=delimiter)
-                writer.writerow(headers)
-                writer.writerows(rows)
+            if format_type == "xlsx":
+                import pandas as pd
+                df = pd.DataFrame(rows, columns=headers)
+                df.to_excel(path, index=False, engine='openpyxl')
+            else:
+                delimiter = '\t' if format_type == 'tsv' else ','
+                with open(path, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f, delimiter=delimiter)
+                    writer.writerow(headers)
+                    writer.writerows(rows)
                 
             QMessageBox.information(self, "Export Successful", f"Exported {len(rows)} records to {path}")
             

@@ -313,6 +313,7 @@ class HarvestWorkerV2(QThread):
                 max_workers=max_workers,
                 call_number_mode=call_number_mode,
                 stop_rule=self.config.get("stop_rule", "stop_either"),
+                both_stop_policy=self.config.get("both_stop_policy", "both"),
             )
 
             # Final stats
@@ -384,13 +385,34 @@ class HarvestWorkerV2(QThread):
             self._live_result_handles[key] = fh
 
     def _close_live_result_files(self):
-        for fh in self._live_result_handles.values():
+        saved_paths = []
+        for key, fh in self._live_result_handles.items():
             try:
                 fh.flush()
+                saved_paths.append(fh.name)
                 fh.close()
             except Exception:
                 pass
         self._live_result_handles = {}
+        self._generate_excel_copies(saved_paths)
+
+    def _generate_excel_copies(self, tsv_paths):
+        """Post-flight conversion of TSV to XLSX."""
+        if not tsv_paths: return
+        try:
+            import pandas as pd
+            for path_str in tsv_paths:
+                tsv_path = Path(path_str)
+                if tsv_path.exists() and tsv_path.stat().st_size > 0:
+                    try:
+                        # Attempt to read the TSV
+                        df = pd.read_csv(str(tsv_path), sep='\t', dtype=str)
+                        excel_path = tsv_path.with_suffix('.xlsx')
+                        df.to_excel(str(excel_path), index=False, engine='openpyxl')
+                    except Exception as e:
+                        print(f"Failed to convert {tsv_path.name} to Excel: {e}")
+        except ImportError:
+            print("Missing pandas/openpyxl for Excel generation.")
 
     def _append_live_row(self, bucket, row):
         fh = self._live_result_handles.get(bucket)
@@ -737,7 +759,7 @@ class DroppableGroupBox(QGroupBox):
 
     def dropEvent(self, event: QDropEvent):
         files = [url.toLocalFile() for url in event.mimeData().urls()]
-        valid_files = [f for f in files if f.endswith((".tsv", ".txt", ".csv"))]
+        valid_files = [f for f in files if f.endswith((".tsv", ".txt", ".csv", ".xlsx", ".xls"))]
 
         if valid_files:
             file_path = valid_files[0]
@@ -751,7 +773,7 @@ class DroppableGroupBox(QGroupBox):
             from PyQt6.QtWidgets import QMessageBox
 
             QMessageBox.warning(
-                self, "Invalid File", "Please drop a valid TSV, TXT, or CSV file."
+                self, "Invalid File", "Please drop a valid TSV, TXT, CSV, or Excel file."
             )
             event.ignore()
             self._update_state("normal")
@@ -823,8 +845,25 @@ class HarvestTabV2(QWidget):
         self._check_start_conditions()
 
     def _setup_ui(self):
-        # Direct layout — no outer scroll; the whole page sizes to fit the window
-        layout = QVBoxLayout(self)
+        # Wrap everything in a scroll area so the layout never compresses on resize
+        _outer = QVBoxLayout(self)
+        _outer.setContentsMargins(0, 0, 0, 0)
+        _outer.setSpacing(0)
+
+        _scroll = QScrollArea()
+        _scroll.setWidgetResizable(True)
+        _scroll.setFrameShape(QFrame.Shape.NoFrame)
+        _scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        _scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        _scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+
+        _scr_content = QWidget()
+        _scr_content.setMinimumWidth(780)   # never compress below this
+        _scroll.setWidget(_scr_content)
+        _outer.addWidget(_scroll)
+
+        # All content goes into this inner layout
+        layout = QVBoxLayout(_scr_content)
         layout.setSpacing(16)
         layout.setContentsMargins(30, 24, 30, 24)
 
@@ -993,6 +1032,8 @@ class HarvestTabV2(QWidget):
         # ── 4. Preview ─────────────────────────────────────────────────────────
         preview_frame = QFrame()
         preview_frame.setProperty("class", "Card")
+        # Prevent the preview from expanding vertically to fill leftover space
+        preview_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         preview_frame_layout = QVBoxLayout(preview_frame)
         preview_frame_layout.setContentsMargins(12, 10, 12, 10)
         preview_frame_layout.setSpacing(8)
@@ -1032,6 +1073,9 @@ class HarvestTabV2(QWidget):
         self.preview_text.setStyleSheet("font-size: 13px; font-family: 'Consolas', monospace;")
         preview_frame_layout.addWidget(self.preview_text)
         layout.addWidget(preview_frame)
+
+        # Absorb all extra vertical space here so nothing above or below stretches
+        layout.addStretch(1)
 
         # ── 5. Status pill + elapsed timer (created here, placed in action bar) ─
         self.lbl_run_status = QLabel("Idle")
@@ -1540,7 +1584,7 @@ class HarvestTabV2(QWidget):
             self,
             "Select ISBN Input File",
             "",
-            "All Files (*.*);;TSV Files (*.tsv);;Text Files (*.txt);;CSV Files (*.csv)",
+            "All Files (*.*);;Excel Files (*.xlsx *.xls);;TSV Files (*.tsv);;Text Files (*.txt);;CSV Files (*.csv)",
         )
         if file_path:
             self.set_input_file(file_path)
@@ -1561,28 +1605,24 @@ class HarvestTabV2(QWidget):
         mode_text = self.combo_run_mode.currentText()
         if mode_text == "NLM Only":
             config["call_number_mode"] = "nlmcn"
+            config["both_stop_policy"] = "nlmcn"
         elif mode_text == "Both (LCCN & NLM)":
             config["call_number_mode"] = "both"
-            
-            # Map stop rule dropdown back to internal identifier
+
+            # Read stop rule from the UI combo (no popup needed — user already chose)
             stop_text = self.combo_stop_rule.currentText()
             stop_mapping = {
-                "Stop if either found": "stop_either",
-                "Stop if LCCN found": "stop_lccn",
-                "Stop if NLMCN found": "stop_nlmcn",
-                "Continue until both found": "continue_both"
+                "Stop if either found":        ("stop_either", "either"),
+                "Stop if LCCN found":          ("stop_lccn",   "lccn"),
+                "Stop if NLMCN found":         ("stop_nlmcn",  "nlmcn"),
+                "Continue until both found":   ("continue_both", "both"),
             }
-            config["stop_rule"] = stop_mapping.get(stop_text, "stop_either")
+            stop_rule_val, both_policy_val = stop_mapping.get(stop_text, ("stop_either", "either"))
+            config["stop_rule"] = stop_rule_val
+            config["both_stop_policy"] = both_policy_val
         else:
             config["call_number_mode"] = "lccn"
-        if config["call_number_mode"] == "both":
-            both_stop_policy = self._prompt_both_stop_policy()
-            if both_stop_policy is None:
-                self.log_output.setText("Harvest cancelled before start.")
-                return
-            config["both_stop_policy"] = both_stop_policy
-        else:
-            config["both_stop_policy"] = config["call_number_mode"]
+            config["both_stop_policy"] = "lccn"
 
         # 2. Get Targets
         targets = self._targets_getter() if self._targets_getter else []
