@@ -191,6 +191,13 @@ class ModernMainWindow(QMainWindow):
         self.stack.addWidget(self.help_tab)              # 4
 
         content_layout.addWidget(self.stack)
+
+        # Status pill — a small label at the bottom of the content area
+        self.status_pill = QLabel("Idle")
+        self.status_pill.setObjectName("StatusPill")
+        self.status_pill.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        content_layout.addWidget(self.status_pill)
+
         main_layout.addWidget(content_container)
 
         # --- Wire Up V2 Data Flow ---
