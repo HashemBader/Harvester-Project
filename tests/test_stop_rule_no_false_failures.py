@@ -128,6 +128,8 @@ def test_continue_both_collects_both_sequential(tmp_path):
     main = _assert_no_false_failures(db)
     assert main.lccn == "QA76"
     assert main.nlmcn == "WA100"
+    assert main.lccn_source == "LCCNOnly"
+    assert main.nlmcn_source == "NLMOnly"
 
 
 def test_continue_both_partial_success_no_false_failure(tmp_path):
@@ -169,3 +171,5 @@ def test_continue_both_parallel(tmp_path):
     main = _assert_no_false_failures(db)
     assert main.lccn == "QA76"
     assert main.nlmcn == "WA100"
+    assert main.lccn_source == "LCCNOnly"
+    assert main.nlmcn_source == "NLMOnly"

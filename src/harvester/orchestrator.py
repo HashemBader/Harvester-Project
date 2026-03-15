@@ -295,7 +295,14 @@ class HarvestOrchestrator:
             },
         )
 
-    def _process_isbn_internal(self, isbn: str, *, dry_run: bool) -> ProcessOutcome:
+    def _process_isbn_internal(
+        self,
+        isbn: str,
+        *,
+        dry_run: bool,
+        pending_main: list[MainRecord],
+        pending_attempted: list[tuple[str, Optional[str], str, Optional[str], Optional[str]]],
+    ) -> ProcessOutcome:
         self._check_cancelled()
         self._emit("isbn_start", {"isbn": isbn})
 
@@ -330,15 +337,17 @@ class HarvestOrchestrator:
         other_errors: list[tuple[str, str]] = []
         skipped_retry_targets: list[str] = []
         
-        # Accumulate results for "both" mode
-        best_lccn: Optional[str] = None
-        best_nlmcn: Optional[str] = None
-        best_source: Optional[str] = None
+        # Accumulate results for "both" mode — seed from cache so mid-run
+        # decisions see everything already known.
+        best_lccn: Optional[str] = found_lccn
+        best_lccn_source: Optional[str] = found_lccn_source
+        best_nlmcn: Optional[str] = found_nlmcn
+        best_nlmcn_source: Optional[str] = found_nlmcn_source
 
         for target in self.targets:
             self._check_cancelled()
             last_target = getattr(target, "name", target.__class__.__name__)
-            required_types = self._required_types(bool(found_lccn), bool(found_nlmcn))
+            required_types = self._required_types(bool(best_lccn), bool(best_nlmcn))
             if not required_types:
                 break
 
@@ -364,10 +373,10 @@ class HarvestOrchestrator:
             if result.success:
                 if result.lccn and not best_lccn:
                     best_lccn = result.lccn
-                    if not best_source: best_source = result.source or last_target
+                    best_lccn_source = result.source or last_target
                 if result.nlmcn and not best_nlmcn:
                     best_nlmcn = result.nlmcn
-                    if not best_source: best_source = result.source or last_target
+                    best_nlmcn_source = result.source or last_target
 
                 should_stop = False
                 
@@ -407,25 +416,21 @@ class HarvestOrchestrator:
 
         # Check if we accumulated any success
         if best_lccn or best_nlmcn:
-            self._emit(
-                "success",
-                {
-                    "isbn": isbn,
-                    "target": best_source,
-                    "source": best_source,
-                    "lccn": best_lccn,
-                    "nlmcn": best_nlmcn,
-                },
+            rec = self._build_record(
+                isbn=isbn,
+                lccn=best_lccn,
+                lccn_source=best_lccn_source,
+                nlmcn=best_nlmcn,
+                nlmcn_source=best_nlmcn_source,
             )
+            self._emit_result("success", isbn=isbn, target=rec.source or "Unknown", record=rec)
 
-            rec = None
-            if not dry_run:
-                rec = MainRecord(
-                    isbn=isbn,
-                    lccn=best_lccn,
-                    nlmcn=best_nlmcn,
-                    source=best_source,
-                )
+            if dry_run:
+                rec = None
+            else:
+                pending_main.append(rec)
+            if not dry_run and attempted_rows:
+                pending_attempted.extend(attempted_rows)
 
             return ProcessOutcome("success", rec, tuple(attempted_rows))
 
@@ -463,6 +468,8 @@ class HarvestOrchestrator:
                 other_errors=other_errors,
             ),
         )
+        if not dry_run and attempted_rows:
+            pending_attempted.extend(attempted_rows)
         return ProcessOutcome("failed", None, tuple(attempted_rows))
 
     def process_isbn(
@@ -473,11 +480,12 @@ class HarvestOrchestrator:
         pending_main: list[MainRecord],
         pending_attempted: list[tuple[str, Optional[str], str, Optional[str], Optional[str]]],
     ) -> str:
-        outcome = self._process_isbn_internal(isbn, dry_run=dry_run)
-        if not dry_run and outcome.record is not None and outcome.status == "success":
-            pending_main.append(outcome.record)
-        if not dry_run and outcome.attempted_rows:
-            pending_attempted.extend(outcome.attempted_rows)
+        outcome = self._process_isbn_internal(
+            isbn,
+            dry_run=dry_run,
+            pending_main=pending_main,
+            pending_attempted=pending_attempted,
+        )
         return outcome.status
     def run(self, isbns: list[str], *, dry_run: bool) -> HarvestSummary:
         cached_hits = 0
@@ -590,8 +598,9 @@ class HarvestOrchestrator:
 
                 # Accumulate best results and apply stop_rule (mirrors process_isbn)
                 best_lccn: Optional[str] = None
+                best_lccn_source: Optional[str] = None
                 best_nlmcn: Optional[str] = None
-                best_source: Optional[str] = None
+                best_nlmcn_source: Optional[str] = None
 
                 for target in self.targets:
                     self._check_cancelled()
@@ -612,12 +621,10 @@ class HarvestOrchestrator:
                     if result.success:
                         if result.lccn and not best_lccn:
                             best_lccn = result.lccn
-                            if not best_source:
-                                best_source = result.source or last_target
+                            best_lccn_source = result.source or last_target
                         if result.nlmcn and not best_nlmcn:
                             best_nlmcn = result.nlmcn
-                            if not best_source:
-                                best_source = result.source or last_target
+                            best_nlmcn_source = result.source or last_target
 
                         should_stop = False
                         if self.call_number_mode == "both":
@@ -648,21 +655,16 @@ class HarvestOrchestrator:
                         attempted_rows.append((isbn, last_target, self.call_number_mode, utc_now_iso(), last_error))
 
                 if best_lccn or best_nlmcn:
-                    self._emit("success", {
-                        "isbn": isbn,
-                        "target": best_source,
-                        "source": best_source,
-                        "lccn": best_lccn,
-                        "nlmcn": best_nlmcn,
-                    })
-                    rec = None
-                    if not dry_run:
-                        rec = MainRecord(
-                            isbn=isbn,
-                            lccn=best_lccn,
-                            nlmcn=best_nlmcn,
-                            source=best_source,
-                        )
+                    rec = self._build_record(
+                        isbn=isbn,
+                        lccn=best_lccn,
+                        lccn_source=best_lccn_source,
+                        nlmcn=best_nlmcn,
+                        nlmcn_source=best_nlmcn_source,
+                    )
+                    self._emit_result("success", isbn=isbn, target=rec.source or "Unknown", record=rec)
+                    if dry_run:
+                        rec = None
                     # Don't pass attempted_rows — successes drop intermediate failures
                     return ("success", rec, None)
 

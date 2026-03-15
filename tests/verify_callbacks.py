@@ -6,7 +6,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.harvester.orchestrator import HarvestOrchestrator, HarvestTarget, TargetResult
-from src.database import DatabaseManager
+from src.database import DatabaseManager, MainRecord
 
 class MockTarget:
     def __init__(self, name, success=False, error=None):
@@ -39,7 +39,6 @@ def test_callbacks():
         db=db,
         targets=[target1, target2],
         progress_cb=progress_cb,
-        batch_size=1
     )
 
     print("Running orch.run for '9781234567890'...")
@@ -48,10 +47,12 @@ def test_callbacks():
     # Verification
     expected_sequence = [
         "isbn_start",
-        "target_start", # Target1
-        "target_start", # Target2
-        "success",      # Target2
-        "stats"         # Running stats
+        "target_start",    # Target1
+        "attempt_failed",  # Target1 lccn fail
+        "attempt_failed",  # Target1 nlmcn fail
+        "target_start",    # Target2
+        "success",         # Target2
+        "stats"            # Running stats
     ]
     
     actual_sequence = [e[0] for e in events]
@@ -61,14 +62,11 @@ def test_callbacks():
     
     # Check payloads
     assert events[1][1]["target"] == "Target1"
-    assert events[2][1]["target"] == "Target2"
-    assert events[3][1]["target"] == "Target2"
-    
-    assert events[3][1]["target"] == "Target2"
+    assert events[4][1]["target"] == "Target2"
+    assert events[5][1]["lccn"] == "123"
     
     # Check stats event
     # Orchestrator emits stats after each ISBN processing
-    # With batch_size=1, flush() might also happen, but stats are emitted before flushing logic inside the loop
     # Let's find the last 'stats' event
     stats_events = [e for e in events if e[0] == "stats"]
     assert len(stats_events) > 0, "No stats event emitted"
@@ -81,7 +79,10 @@ def test_callbacks():
 
     # Test Case 2: Cache Hit
     events.clear()
-    db.get_main.return_value = "CachedRecord"
+    db.get_main.return_value = MainRecord(
+        isbn="cached-isbn", lccn="LC123", lccn_source="Cache",
+        nlmcn="NLM456", nlmcn_source="Cache", source="Cache",
+    )
     
     print("Running orch.run for 'cached-isbn'...")
     orch.run(["cached-isbn"], dry_run=True)

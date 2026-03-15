@@ -38,7 +38,6 @@ def run_benchmark():
         db=db,
         targets=[MockSlowTarget()],
         max_workers=1,
-        batch_size=10
     )
     start_seq = time.time()
     orch_seq.run(isbns, dry_run=True)
@@ -51,7 +50,6 @@ def run_benchmark():
         db=db,
         targets=[MockSlowTarget()],
         max_workers=4,
-        batch_size=10
     )
     start_par = time.time()
     orch_par.run(isbns, dry_run=True)
