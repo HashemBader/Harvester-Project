@@ -46,22 +46,47 @@ from .input_tab import ClickableDropZone
 from src.harvester.run_harvest import run_harvest, parse_isbn_file, RunStats
 from src.harvester.targets import create_target_from_config
 from src.harvester.orchestrator import HarvestCancelled
-from src.database import DatabaseManager
+from src.database import DatabaseManager, today_yyyymmdd
 from src.utils import messages
 
 
-def _write_excel_autofit(df, path: str) -> None:
-    """Write a DataFrame to Excel with auto-fitted column widths."""
-    import pandas as pd
-    with pd.ExcelWriter(path, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Sheet1')
-        ws = writer.sheets['Sheet1']
-        for col in ws.columns:
-            max_len = max(
-                (len(str(cell.value)) for cell in col if cell.value is not None),
-                default=0
-            )
-            ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 80)
+def _col_letter(n: int) -> str:
+    result = ""
+    while n > 0:
+        n, rem = divmod(n - 1, 26)
+        result = chr(65 + rem) + result
+    return result
+
+
+def _write_excel_autofit(rows_with_header: list, path: str) -> None:
+    """Write rows to a valid .xlsx using only Python stdlib — no openpyxl/pandas needed."""
+    import zipfile
+
+    def esc(s: str) -> str:
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+    sheet_rows_xml = []
+    for r_idx, row in enumerate(rows_with_header, 1):
+        cells = "".join(
+            f'<c r="{_col_letter(c_idx)}{r_idx}" t="inlineStr"><is><t>{esc(str(val) if val is not None else "")}</t></is></c>'
+            for c_idx, val in enumerate(row, 1)
+        )
+        sheet_rows_xml.append(f'<row r="{r_idx}">{cells}</row>')
+
+    content_types = ('<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>')
+    rels = ('<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
+    workbook = ('<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>')
+    workbook_rels = ('<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>')
+    styles = ('<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts><font><sz val="11"/></font></fonts><fills><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>')
+    sheet = (f'<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{"".join(sheet_rows_xml)}</sheetData></worksheet>')
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", content_types)
+        zf.writestr("_rels/.rels", rels)
+        zf.writestr("xl/workbook.xml", workbook)
+        zf.writestr("xl/_rels/workbook.xml.rels", workbook_rels)
+        zf.writestr("xl/styles.xml", styles)
+        zf.writestr("xl/worksheets/sheet1.xml", sheet)
 
 
 def _extract_lc_classification(lccn: str) -> str:
@@ -414,21 +439,20 @@ class HarvestWorkerV2(QThread):
         self._generate_excel_copies(saved_paths)
 
     def _generate_excel_copies(self, tsv_paths):
-        """Post-flight conversion of TSV to XLSX."""
-        if not tsv_paths: return
-        try:
-            import pandas as pd
-            for path_str in tsv_paths:
-                tsv_path = Path(path_str)
-                if tsv_path.exists() and tsv_path.stat().st_size > 0:
-                    try:
-                        df = pd.read_csv(str(tsv_path), sep='\t', dtype=str)
-                        excel_path = tsv_path.with_suffix('.xlsx')
-                        _write_excel_autofit(df, str(excel_path))
-                    except Exception as e:
-                        print(f"Failed to convert {tsv_path.name} to Excel: {e}")
-        except ImportError:
-            print("Missing pandas/openpyxl for Excel generation.")
+        """Post-flight conversion of TSV to XLSX using stdlib only."""
+        import csv as _csv
+        if not tsv_paths:
+            return
+        for path_str in tsv_paths:
+            tsv_path = Path(path_str)
+            if tsv_path.exists() and tsv_path.stat().st_size > 0:
+                try:
+                    with open(str(tsv_path), newline="", encoding="utf-8") as f:
+                        rows = list(_csv.reader(f, delimiter="\t"))
+                    excel_path = tsv_path.with_suffix(".xlsx")
+                    _write_excel_autofit(rows, str(excel_path))
+                except Exception as e:
+                    print(f"Failed to convert {tsv_path.name} to Excel: {e}")
 
     def _append_live_row(self, bucket, row):
         fh = self._live_result_handles.get(bucket)
@@ -461,7 +485,7 @@ class HarvestWorkerV2(QThread):
         nlmcn_source=None,
     ):
         classification = _extract_lc_classification(lccn or "")
-        date_added = datetime.now().isoformat().replace('T', ' ').split('.')[0]
+        date_added = today_yyyymmdd()
         normalized_isbn = str(isbn or "").replace("-", "").strip()
         mode = (self.config.get("call_number_mode", "lccn") or "lccn").strip().lower()
         if mode == "nlmcn":
@@ -679,7 +703,7 @@ class HarvestWorkerV2(QThread):
                         "VALUES (?, ?, ?, ?, 1, 'Invalid ISBN') "
                         "ON CONFLICT(isbn, last_target, attempt_type) DO UPDATE SET "
                         "last_attempted=excluded.last_attempted, fail_count=fail_count+1, last_error='Invalid ISBN'",
-                        (raw_isbn[:20], "Validation", "validation", datetime.now().isoformat()),
+                        (raw_isbn[:20], "Validation", "validation", today_yyyymmdd()),
                     )
         except Exception:
             pass
@@ -1866,16 +1890,24 @@ class HarvestTabV2(QWidget):
 
         details = []
         for isbn, att in recent[:12]:
-            last_attempted = att.last_attempted or "Unknown"
+            last_attempted = att.last_attempted
             try:
-                last_dt = datetime.fromisoformat(last_attempted)
-                if last_dt.tzinfo is None:
-                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                last_val = str(last_attempted) if last_attempted is not None else ""
+                if last_val.isdigit() and len(last_val) == 8:
+                    # yyyymmdd integer format
+                    last_dt = datetime(int(last_val[:4]), int(last_val[4:6]), int(last_val[6:8]), tzinfo=timezone.utc)
+                elif last_val:
+                    # legacy ISO string format
+                    last_dt = datetime.fromisoformat(last_val)
+                    if last_dt.tzinfo is None:
+                        last_dt = last_dt.replace(tzinfo=timezone.utc)
+                else:
+                    raise ValueError("empty")
                 next_dt = last_dt + timedelta(days=retry_days)
-                next_str = next_dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
-                last_str = last_dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+                next_str = next_dt.astimezone().strftime("%Y-%m-%d")
+                last_str = last_dt.astimezone().strftime("%Y-%m-%d")
             except Exception:
-                last_str = str(last_attempted)
+                last_str = str(last_attempted) if last_attempted is not None else "Unknown"
                 next_str = "Unknown"
             details.append(
                 f"{isbn} | last not found: {last_str} | retry after: {next_str}"

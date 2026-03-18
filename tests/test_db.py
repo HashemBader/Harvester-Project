@@ -61,6 +61,42 @@ def test_attempted_upsert_increments_fail_count(tmp_path: Path):
     assert keys == {("Harvard", "both"), ("LoC", "both"), ("Harvard", "lccn")}
 
 
+def test_date_stored_as_yyyymmdd_integer(tmp_path: Path):
+    """After upsert, date_added and last_attempted must be stored as yyyymmdd integers, not strings."""
+    import sqlite3 as _sqlite3
+    from src.database.db_manager import today_yyyymmdd
+
+    db_path = tmp_path / "test.sqlite3"
+    db = DatabaseManager(db_path)
+    db.init_db()
+
+    # -- main.date_added --
+    rec = MainRecord(isbn="9780000000001", lccn="QA1.A1", source="LoC")
+    db.upsert_main(rec)
+
+    with _sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            "SELECT date_added, typeof(date_added) FROM main WHERE isbn = '9780000000001'"
+        ).fetchone()
+    assert row is not None, "Record not found in main table"
+    date_val, type_val = row
+    assert type_val == "integer", f"date_added should be INTEGER, got {type_val!r} (value={date_val!r})"
+    today = today_yyyymmdd()
+    assert date_val == today, f"date_added should be today's yyyymmdd ({today}), got {date_val!r}"
+
+    # -- attempted.last_attempted --
+    db.upsert_attempted(isbn="9780000000002", last_target="LoC", attempt_type="both", last_error="Not found")
+
+    with _sqlite3.connect(str(db_path)) as conn:
+        row = conn.execute(
+            "SELECT last_attempted, typeof(last_attempted) FROM attempted WHERE isbn = '9780000000002'"
+        ).fetchone()
+    assert row is not None, "Record not found in attempted table"
+    att_val, att_type = row
+    assert att_type == "integer", f"last_attempted should be INTEGER, got {att_type!r} (value={att_val!r})"
+    assert att_val == today, f"last_attempted should be today's yyyymmdd ({today}), got {att_val!r}"
+
+
 def test_should_skip_retry(tmp_path: Path):
     db_path = tmp_path / "test.sqlite3"
     db = DatabaseManager(db_path)
