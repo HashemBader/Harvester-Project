@@ -26,7 +26,9 @@ class TargetsConfigTab(QWidget):
         self.targets_tab = TargetsTabV2()
         self.splitter.addWidget(self.config_tab)
         self.splitter.addWidget(self.targets_tab)
-        self.splitter.setSizes([260, 540])
+        self.splitter.setSizes([150, 650])
+        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(1, 1)
         layout.addWidget(self.splitter)
 
     def _connect_internal_signals(self):

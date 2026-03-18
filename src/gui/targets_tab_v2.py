@@ -35,8 +35,6 @@ from PyQt6.QtWidgets import (
     QToolButton,
     QInputDialog,
     QSizePolicy,
-    QScrollArea,
-    QFrame,
 )
 
 from utils.targets_manager import TargetsManager, Target
@@ -384,21 +382,9 @@ class TargetsTabV2(QWidget):
         return super().eventFilter(obj, event)
 
     def _setup_ui(self):
-        # Wrap content in a scroll area so widgets never get compressed on resize
-        _outer = QVBoxLayout(self)
-        _outer.setContentsMargins(0, 0, 0, 0)
-        _outer.setSpacing(0)
-        _scroll = QScrollArea()
-        _scroll.setWidgetResizable(True)
-        _scroll.setFrameShape(QFrame.Shape.NoFrame)
-        _scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
-        _scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        _scr_content = QWidget()
-        _scroll.setWidget(_scr_content)
-        _outer.addWidget(_scroll)
-        layout = QVBoxLayout(_scr_content)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(16)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 10, 16, 10)
+        layout.setSpacing(10)
 
         # Action buttons row (includes profile selector)
         btn_layout = QHBoxLayout()
@@ -664,7 +650,7 @@ class TargetsTabV2(QWidget):
                     background-color: {btn_color};
                     color: #ffffff;
                     border: none;
-                    border-radius: 6px;
+                    border-radius: 0px;
                     font-weight: bold;
                     font-size: 12px;
                     padding: 0 12px;

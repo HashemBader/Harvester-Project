@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QComboBox,
     QSpinBox, QMessageBox, QDialog, QDialogButtonBox, QLineEdit,
-    QScrollArea
+    QSizePolicy,
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from pathlib import Path
@@ -147,136 +147,108 @@ class ConfigTabV2(QWidget):
         self.refresh_targets_preview()
 
     def _setup_ui(self):
-        _outer = QVBoxLayout(self)
-        _outer.setContentsMargins(0, 0, 0, 0)
-        _outer.setSpacing(0)
-        _scroll = QScrollArea()
-        _scroll.setWidgetResizable(True)
-        _scroll.setFrameShape(QFrame.Shape.NoFrame)
-        _scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
-        _scr_content = QWidget()
-        _scr_content.setMinimumWidth(600)
-        _scroll.setWidget(_scr_content)
-        _outer.addWidget(_scroll)
-        layout = QVBoxLayout(_scr_content)
-        layout.setSpacing(20)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(6)
+        layout.setContentsMargins(12, 6, 12, 6)
 
         # =========================================================================
-        # 2. Profile Section (Card)
+        # Profile Section (Card)
         # =========================================================================
         profile_frame = QFrame()
         profile_frame.setProperty("class", "Card")
-        profile_layout = QHBoxLayout(profile_frame)
-        profile_layout.setSpacing(20)
-        profile_layout.setContentsMargins(20, 12, 20, 12)
-        
-        # Icon
+        profile_vlayout = QVBoxLayout(profile_frame)
+        profile_vlayout.setSpacing(4)
+        profile_vlayout.setContentsMargins(12, 6, 12, 6)
+
+        # Row 1: Icon + Title + Profile combo + Action buttons
+        profile_row = QHBoxLayout()
+        profile_row.setSpacing(8)
+
         icon_lbl = QLabel()
         icon_lbl.setPixmap(get_pixmap(SVG_SETTINGS, CATPPUCCIN_THEME['primary']))
-        profile_layout.addWidget(icon_lbl)
+        profile_row.addWidget(icon_lbl)
 
-        # Title
         profile_title = QLabel("Profile Settings")
-        profile_title.setStyleSheet("font-size: 15px; font-weight: bold;")
-        profile_layout.addWidget(profile_title)
-        
-        # Selector
-        info_layout = QVBoxLayout()
-        
+        profile_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        profile_row.addWidget(profile_title)
+
         self.profile_combo = ConsistentComboBox()
-        self.profile_combo.setMinimumWidth(300)
+        self.profile_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.profile_combo.setAccessibleName("Active profile selector")
         self.profile_combo.setAccessibleDescription("Choose which saved profile is active.")
         self._refresh_profile_list()
         self.profile_combo.currentTextChanged.connect(self._on_profile_selected)
-        
-        info_layout.addWidget(self.profile_combo)
-        
-        profile_layout.addLayout(info_layout)
-        
-        profile_layout.addStretch()
-        
-        # Actions
-        btn_layout = QHBoxLayout()
-        
+        profile_row.addWidget(self.profile_combo, 1)
+
         self.btn_new = QPushButton("&New Profile")
         self.btn_new.setProperty("class", "SecondaryButton")
         self.btn_new.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_new.setAccessibleName("Create profile")
         self.btn_new.setToolTip("Create a new profile from current settings")
         self.btn_new.clicked.connect(self._create_new_profile)
-        
+
         self.btn_save = QPushButton("&Save Changes")
         self.btn_save.setProperty("class", "PrimaryButton")
         self.btn_save.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_save.setEnabled(False) # Initially disabled
+        self.btn_save.setEnabled(False)
         self.btn_save.setAccessibleName("Save profile changes")
         self.btn_save.setToolTip("Save current settings to the selected profile")
         self.btn_save.clicked.connect(self._save_current_profile)
-        
+
         self.btn_delete = QPushButton("&Delete")
         self.btn_delete.setProperty("class", "DangerButton")
         self.btn_delete.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_delete.setAccessibleName("Delete profile")
         self.btn_delete.setToolTip("Delete the selected profile")
         self.btn_delete.clicked.connect(self._delete_current_profile)
-        
-        btn_layout.addWidget(self.btn_new)
-        btn_layout.addWidget(self.btn_save)
-        btn_layout.addWidget(self.btn_delete)
-        
-        profile_layout.addLayout(btn_layout)
-        
+
+        profile_row.addWidget(self.btn_new)
+        profile_row.addWidget(self.btn_save)
+        profile_row.addWidget(self.btn_delete)
+
+        profile_vlayout.addLayout(profile_row)
+
         layout.addWidget(profile_frame)
 
         # =========================================================================
-        # 3. Settings Form (Card)
+        # Harvest Settings (Card)
         # =========================================================================
         settings_frame = QFrame()
         settings_frame.setProperty("class", "Card")
-        settings_layout = QVBoxLayout(settings_frame)
-        settings_layout.setSpacing(0)
-        settings_layout.setContentsMargins(25, 14, 25, 14)
-
-        # Title + controls on one row
-        form_layout = QHBoxLayout()
-        form_layout.setSpacing(24)
+        settings_row = QHBoxLayout(settings_frame)
+        settings_row.setSpacing(12)
+        settings_row.setContentsMargins(12, 6, 12, 6)
 
         harvest_icon_lbl = QLabel()
         harvest_icon_lbl.setPixmap(get_pixmap(SVG_HARVEST, CATPPUCCIN_THEME['primary']))
-        form_layout.addWidget(harvest_icon_lbl)
+        settings_row.addWidget(harvest_icon_lbl)
 
         harvest_title = QLabel("Harvest Settings")
-        harvest_title.setStyleSheet("font-size: 15px; font-weight: bold;")
-        form_layout.addWidget(harvest_title)
-        form_layout.addSpacing(16)
+        harvest_title.setStyleSheet("font-size: 14px; font-weight: bold;")
+        settings_row.addWidget(harvest_title)
+        settings_row.addSpacing(8)
 
-        # Retry Days
         retry_lbl = QLabel("&Retry Interval")
-        retry_lbl.setStyleSheet("")
 
         self.spin_retry = QSpinBox()
         self.spin_retry.setRange(0, 365)
         self.spin_retry.setValue(7)
         self.spin_retry.setSuffix(" days")
-        self.spin_retry.setFixedWidth(100)
+        self.spin_retry.setMinimumWidth(80)
         self.spin_retry.setAccessibleName("Retry interval")
         self.spin_retry.setToolTip("Days to wait before retrying recently failed ISBNs")
         self.spin_retry.valueChanged.connect(self._on_setting_changed)
         retry_lbl.setBuddy(self.spin_retry)
 
-        retry_pair = QHBoxLayout()
-        retry_pair.setSpacing(8)
-        retry_pair.addWidget(retry_lbl)
-        retry_pair.addWidget(self.spin_retry)
+        settings_row.addWidget(retry_lbl)
+        settings_row.addWidget(self.spin_retry)
+        settings_row.addSpacing(12)
 
-        # Call Number Selection
         mode_lbl = QLabel("Call Number &Selection")
-        mode_lbl.setStyleSheet("")
 
         self.call_number_combo = ConsistentComboBox()
-        self.call_number_combo.setFixedWidth(180)
+        self.call_number_combo.setMinimumWidth(130)
+        self.call_number_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.call_number_combo.setAccessibleName("Call number selection")
         self.call_number_combo.setAccessibleDescription("Choose whether to collect LCCN only, NLMCN only, or both.")
         self.call_number_combo.setToolTip("Select which call-number type is accepted during harvest")
@@ -286,30 +258,19 @@ class ConfigTabV2(QWidget):
         self.call_number_combo.currentTextChanged.connect(self._on_setting_changed)
         mode_lbl.setBuddy(self.call_number_combo)
 
-        mode_pair = QHBoxLayout()
-        mode_pair.setSpacing(8)
-        mode_pair.addWidget(mode_lbl)
-        mode_pair.addWidget(self.call_number_combo)
+        settings_row.addWidget(mode_lbl)
+        settings_row.addWidget(self.call_number_combo)
+        settings_row.addStretch()
 
-        form_layout.addLayout(retry_pair)
-        form_layout.addLayout(mode_pair)
-
-        # Stop Rule is shown in the Harvester tab, not here.
-        # Keep a hidden widget so _load_profile / get_config / _save_current_profile
-        # can still read/write the stop_rule setting without extra changes.
+        # Hidden stop-rule combo (read/written by _load_profile / get_config)
         self.stop_rule_combo = ConsistentComboBox()
         self.stop_rule_combo.addItem("Stop if either found", "stop_either")
         self.stop_rule_combo.addItem("Stop if LCCN found", "stop_lccn")
         self.stop_rule_combo.addItem("Stop if NLMCN found", "stop_nlmcn")
         self.stop_rule_combo.addItem("Continue until both found", "continue_both")
-        self.stop_rule_combo.hide()  # not shown in the Config tab UI
+        self.stop_rule_combo.hide()
 
-        form_layout.addStretch()
-        
-        settings_layout.addLayout(form_layout)
         layout.addWidget(settings_frame)
-
-        layout.addStretch()
 
     def _toggle_stop_rule_visibility(self):
         """No-op: Stop Rule is now shown in the Harvester tab."""
