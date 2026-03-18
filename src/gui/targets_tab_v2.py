@@ -650,7 +650,7 @@ class TargetsTabV2(QWidget):
                     background-color: {btn_color};
                     color: #ffffff;
                     border: none;
-                    border-radius: 6px;
+                    border-radius: 0px;
                     font-weight: bold;
                     font-size: 12px;
                     padding: 0 12px;

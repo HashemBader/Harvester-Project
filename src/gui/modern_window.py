@@ -146,6 +146,13 @@ class ModernMainWindow(QMainWindow):
 
         sidebar_layout.addStretch() # Spacer
 
+        # Sidebar status pill — shows harvester state (Idle / Running / Paused / etc.)
+        self.sidebar_status = QLabel("● Idle")
+        self.sidebar_status.setProperty("class", "StatusPill")
+        self.sidebar_status.setProperty("state", "idle")
+        self.sidebar_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.sidebar_status.setContentsMargins(10, 4, 10, 4)
+        sidebar_layout.addWidget(self.sidebar_status)
 
         # Theme toggle button (bottom, like Accessibility)
         self.btn_theme = QPushButton("Toggle Theme")
@@ -191,12 +198,6 @@ class ModernMainWindow(QMainWindow):
         self.stack.addWidget(self.help_tab)              # 4
 
         content_layout.addWidget(self.stack)
-
-        # Status pill — a small label at the bottom of the content area
-        self.status_pill = QLabel("Idle")
-        self.status_pill.setObjectName("StatusPill")
-        self.status_pill.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        content_layout.addWidget(self.status_pill)
 
         main_layout.addWidget(content_container)
 
@@ -340,6 +341,10 @@ class ModernMainWindow(QMainWindow):
             else:
                 btn.setText("  " + btn.property("full_text"))
                 btn.setToolTip("")
+
+        # Show / hide sidebar status text on collapse
+        if hasattr(self, 'sidebar_status'):
+            self.sidebar_status.setVisible(not collapsed)
 
         if not collapsed:
             try:
@@ -562,8 +567,11 @@ class ModernMainWindow(QMainWindow):
         self.dashboard_tab.set_idle()
 
     def _set_sidebar_status(self, text: str, state: str):
-        """No-op: sidebar status pill has been removed (Dashboard header and Harvester banner cover this)."""
-        pass
+        """Update the sidebar status pill to mirror harvester state."""
+        self.sidebar_status.setText(f"● {text}")
+        self.sidebar_status.setProperty("state", state)
+        self.sidebar_status.style().unpolish(self.sidebar_status)
+        self.sidebar_status.style().polish(self.sidebar_status)
 
     def closeEvent(self, event):
         if self.harvest_tab.is_running:
