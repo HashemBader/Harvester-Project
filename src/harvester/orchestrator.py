@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Callable, Optional, Protocol
-from src.database import DatabaseManager, MainRecord, utc_now_iso
+from src.database import DatabaseManager, MainRecord, utc_now_iso, today_yyyymmdd
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -63,7 +63,7 @@ class HarvestSummary:
 class ProcessOutcome:
     status: str
     record: Optional[MainRecord]
-    attempted_rows: tuple[tuple[str, Optional[str], str, Optional[str], Optional[str]], ...]
+    attempted_rows: tuple[tuple[str, Optional[str], str, Optional[int], Optional[str]], ...]
 
 
 class HarvestCancelled(Exception):
@@ -301,7 +301,7 @@ class HarvestOrchestrator:
         *,
         dry_run: bool,
         pending_main: list[MainRecord],
-        pending_attempted: list[tuple[str, Optional[str], str, Optional[str], Optional[str]]],
+        pending_attempted: list[tuple[str, Optional[str], str, Optional[int], Optional[str]]],
     ) -> ProcessOutcome:
         self._check_cancelled()
         self._emit("isbn_start", {"isbn": isbn})
@@ -311,7 +311,7 @@ class HarvestOrchestrator:
         found_lccn_source: Optional[str] = None
         found_nlmcn: Optional[str] = None
         found_nlmcn_source: Optional[str] = None
-        attempted_rows: list[tuple[str, Optional[str], str, Optional[str], Optional[str]]] = []
+        attempted_rows: list[tuple[str, Optional[str], str, Optional[int], Optional[str]]] = []
 
         if isbn not in self.bypass_cache_isbns:
             cached_rec = self.db.get_main(isbn)
@@ -360,7 +360,7 @@ class HarvestOrchestrator:
 
             self._emit("target_start", {"isbn": isbn, "target": last_target})
             raw_result = target.lookup(isbn)
-            attempt_time = utc_now_iso()
+            attempt_time = today_yyyymmdd()
             source_name = raw_result.source or last_target
 
             if self.call_number_mode == "lccn":
@@ -478,7 +478,7 @@ class HarvestOrchestrator:
         *,
         dry_run: bool,
         pending_main: list[MainRecord],
-        pending_attempted: list[tuple[str, Optional[str], str, Optional[str], Optional[str]]],
+        pending_attempted: list[tuple[str, Optional[str], str, Optional[int], Optional[str]]],
     ) -> str:
         outcome = self._process_isbn_internal(
             isbn,
@@ -496,7 +496,7 @@ class HarvestOrchestrator:
 
         # --- Sprint 5: batching buffers ---
         pending_main: list[MainRecord] = []
-        pending_attempted: list[tuple[str, Optional[str], str, Optional[str], Optional[str]]] = []
+        pending_attempted: list[tuple[str, Optional[str], str, Optional[int], Optional[str]]] = []
 
         def flush() -> None:
             """Flush buffered DB writes in a single transaction."""
@@ -594,7 +594,7 @@ class HarvestOrchestrator:
                 not_found_targets: list[str] = []
                 other_errors: list[tuple[str, str]] = []
                 skipped_retry_targets: list[str] = []
-                attempted_rows: list[tuple[str, Optional[str], str, Optional[str], Optional[str]]] = []
+                attempted_rows: list[tuple[str, Optional[str], str, Optional[int], Optional[str]]] = []
 
                 # Accumulate best results and apply stop_rule (mirrors process_isbn)
                 best_lccn: Optional[str] = None
@@ -652,7 +652,7 @@ class HarvestOrchestrator:
                     elif err:
                         other_errors.append((last_target, err))
                     if not dry_run:
-                        attempted_rows.append((isbn, last_target, self.call_number_mode, utc_now_iso(), last_error))
+                        attempted_rows.append((isbn, last_target, self.call_number_mode, today_yyyymmdd(), last_error))
 
                 if best_lccn or best_nlmcn:
                     rec = self._build_record(

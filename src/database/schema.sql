@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS main (
     nlmcn_source    TEXT,
     classification  TEXT,
     source          TEXT,
-    date_added      TEXT NOT NULL
+    date_added      INTEGER NOT NULL  -- yyyymmdd (e.g. 20260317)
 );
 
 CREATE INDEX IF NOT EXISTS idx_main_source ON main(source);
@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS attempted (
     isbn              TEXT NOT NULL,
     last_target       TEXT NOT NULL,
     attempt_type      TEXT NOT NULL DEFAULT 'both',
-    last_attempted    TEXT NOT NULL,
+    last_attempted    INTEGER NOT NULL,  -- yyyymmdd (e.g. 20260317)
     fail_count        INTEGER NOT NULL DEFAULT 1,
     last_error        TEXT,
     PRIMARY KEY (isbn, last_target, attempt_type)
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS subjects (
     indicator2  TEXT,         -- thesaurus indicator (2nd indicator)
     subject     TEXT NOT NULL,
     source      TEXT,
-    date_added  TEXT NOT NULL,
+    date_added  INTEGER NOT NULL,  -- yyyymmdd (e.g. 20260317)
     FOREIGN KEY (isbn) REFERENCES main(isbn) ON DELETE CASCADE
 );
 

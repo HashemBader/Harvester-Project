@@ -20,18 +20,43 @@ from .combo_boxes import ConsistentComboBox
 from .styles_v2 import CATPPUCCIN_THEME
 
 
-def _write_excel_autofit(df, path: str) -> None:
-    """Write a DataFrame to Excel with auto-fitted column widths."""
-    import pandas as pd
-    with pd.ExcelWriter(path, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Sheet1')
-        ws = writer.sheets['Sheet1']
-        for col in ws.columns:
-            max_len = max(
-                (len(str(cell.value)) for cell in col if cell.value is not None),
-                default=0
-            )
-            ws.column_dimensions[col[0].column_letter].width = min(max_len + 4, 80)
+def _col_letter(n: int) -> str:
+    result = ""
+    while n > 0:
+        n, rem = divmod(n - 1, 26)
+        result = chr(65 + rem) + result
+    return result
+
+
+def _write_excel_autofit(rows_with_header: list, path: str) -> None:
+    """Write rows to a valid .xlsx using only Python stdlib — no openpyxl/pandas needed."""
+    import zipfile
+
+    def esc(s: str) -> str:
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+
+    sheet_rows_xml = []
+    for r_idx, row in enumerate(rows_with_header, 1):
+        cells = "".join(
+            f'<c r="{_col_letter(c_idx)}{r_idx}" t="inlineStr"><is><t>{esc(str(val) if val is not None else "")}</t></is></c>'
+            for c_idx, val in enumerate(row, 1)
+        )
+        sheet_rows_xml.append(f'<row r="{r_idx}">{cells}</row>')
+
+    content_types = ('<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>')
+    rels = ('<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>')
+    workbook = ('<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets></workbook>')
+    workbook_rels = ('<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>')
+    styles = ('<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts><font><sz val="11"/></font></fonts><fills><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs></styleSheet>')
+    sheet = (f'<?xml version="1.0" encoding="UTF-8"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>{"".join(sheet_rows_xml)}</sheetData></worksheet>')
+
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("[Content_Types].xml", content_types)
+        zf.writestr("_rels/.rels", rels)
+        zf.writestr("xl/workbook.xml", workbook)
+        zf.writestr("xl/_rels/workbook.xml.rels", workbook_rels)
+        zf.writestr("xl/styles.xml", styles)
+        zf.writestr("xl/worksheets/sheet1.xml", sheet)
 
 
 class ResultsTabV2(QWidget):
@@ -238,7 +263,13 @@ class ResultsTabV2(QWidget):
                 key = key_map.get(header, "")
                 
                 val = row_data[key] if key in row_data.keys() else ""
-                
+
+                # Format yyyymmdd integers as readable dates in the display
+                if key == "date_added":
+                    s = str(val).strip()
+                    if len(s) == 8 and s.isdigit():
+                        val = f"{s[:4]}-{s[4:6]}-{s[6:]}"
+
                 item = QTableWidgetItem(str(val))
                 item.setFlags(item.flags() ^ Qt.ItemFlag.ItemIsEditable) # Read-only
                 
@@ -357,9 +388,7 @@ class ResultsTabV2(QWidget):
             rows = [list(row) for row in rows_raw]
 
             if format_type == "xlsx":
-                import pandas as pd
-                df = pd.DataFrame(rows, columns=headers)
-                _write_excel_autofit(df, str(path))
+                _write_excel_autofit([headers] + rows, str(path))
             else:
                 delimiter = '\t' if format_type == 'tsv' else ','
                 with open(path, 'w', newline='', encoding='utf-8') as f:

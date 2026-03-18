@@ -50,9 +50,18 @@ def export_main_to_tsv(db_path: Union[str, Path], out_path: Union[str, Path]) ->
 
         rows = cursor.fetchall()
 
+    def _fmt_date(val) -> str:
+        """Format yyyymmdd integer (e.g. 20260317) → '2026-03-17'. Pass through anything else."""
+        s = str(val).strip()
+        if len(s) == 8 and s.isdigit():
+            return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+        return s
+
     with out_path.open("w", newline="", encoding="utf-8") as file_handle:
         writer = csv.writer(file_handle, delimiter="\t")
         writer.writerow(EXPORT_HEADER)
-        writer.writerows(rows)
+        writer.writerows(
+            (*row[:-1], _fmt_date(row[-1])) for row in rows
+        )
 
     return out_path
