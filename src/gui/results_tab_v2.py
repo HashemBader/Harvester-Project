@@ -227,7 +227,7 @@ class ResultsTabV2(QWidget):
                 headers = ["ISBN", "Last Target", "Last Attempt", "Fail Count", "Error", "Status"]
             else:
                 data = self.db.get_all_results(limit=1000)
-                headers = ["ISBN", "LCCN", "Title", "Author", "Pub. Year", "Publisher", "Source", "Created"]
+                headers = ["ISBN", "LCCN", "LCCN Source", "NLM", "NLM Source", "Classification", "Source", "Created"]
 
             self._populate_table(data, headers)
             self.stats_label.setText(f"Showing {len(data)} records (Limit: 1000)")
@@ -245,10 +245,10 @@ class ResultsTabV2(QWidget):
         key_map = {
             "ISBN": "isbn",
             "LCCN": "lccn",
-            "Title": "title",
-            "Author": "author",
-            "Pub. Year": "pub_year",
-            "Publisher": "publisher",
+            "LCCN Source": "lccn_source",
+            "NLM": "nlmcn",
+            "NLM Source": "nlmcn_source",
+            "Classification": "classification",
             "Source": "source",
             "Created": "date_added",
             "Last Target": "last_target",
@@ -361,29 +361,18 @@ class ResultsTabV2(QWidget):
                             """
                         ).fetchall()
             else:
-                headers = ["ISBN", "LCCN", "Title", "Author", "Pub. Year", "Publisher", "Source", "Created"]
-                with self.db.connect() as conn:
-                    if query_text:
-                        like = f"%{query_text}%"
-                        rows_raw = conn.execute(
-                            """
-                            SELECT isbn, lccn, title, author, pub_year, publisher, source, date_added
-                            FROM main
-                            WHERE lower(coalesce(isbn, '')) LIKE ?
-                               OR lower(coalesce(title, '')) LIKE ?
-                               OR lower(coalesce(author, '')) LIKE ?
-                            ORDER BY date_added DESC
-                            """,
-                            (like, like, like),
-                        ).fetchall()
-                    else:
-                        rows_raw = conn.execute(
-                            """
-                            SELECT isbn, lccn, title, author, pub_year, publisher, source, date_added
-                            FROM main
-                            ORDER BY date_added DESC
-                            """
-                        ).fetchall()
+                headers = ["ISBN", "LCCN", "LCCN Source", "NLM", "NLM Source", "Classification", "Source", "Created"]
+                rows_raw = self.db.get_all_results(limit=100000)
+                if query_text:
+                    filtered = []
+                    for row in rows_raw:
+                        haystack = " ".join(
+                            str(row[key] if key in row.keys() else "")
+                            for key in ("isbn", "lccn", "lccn_source", "nlmcn", "nlmcn_source", "classification", "source")
+                        ).lower()
+                        if query_text in haystack:
+                            filtered.append(row)
+                    rows_raw = filtered
 
             rows = [list(row) for row in rows_raw]
 

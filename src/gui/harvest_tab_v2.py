@@ -89,6 +89,13 @@ def _write_excel_autofit(rows_with_header: list, path: str) -> None:
         zf.writestr("xl/worksheets/sheet1.xml", sheet)
 
 
+def _write_csv_rows(rows_with_header: list, path: str) -> None:
+    """Write rows to a UTF-8 CSV file for Excel and Google Sheets."""
+    with open(path, "w", newline="", encoding="utf-8-sig") as handle:
+        writer = csv.writer(handle)
+        writer.writerows(rows_with_header)
+
+
 def _extract_lc_classification(lccn: str) -> str:
     """Derive the LC class prefix (letters only) from an LCCN / call-number string."""
     if not lccn:
@@ -246,6 +253,7 @@ class HarvestWorkerV2(QThread):
                         payload.get("attempt_type"),
                         payload.get("target"),
                         payload.get("reason"),
+                        payload.get("attempted_date"),
                     )
                     if payload.get("target") and payload.get("target") != "RetryRule":
                         normalized_problem = self._normalize_target_problem(payload.get("reason"))
@@ -412,7 +420,7 @@ class HarvestWorkerV2(QThread):
         headers = {
             "successful": self._successful_headers(),
             "invalid": ["ISBN"],
-            "failed": ["Call Number Type", "ISBN", "Target", "Reason"],
+            "failed": ["Call Number Type", "ISBN", "Target", "Date Attempted", "Reason"],
             "problems": ["Target", "Problem"],
         }
         self._close_live_result_files()
@@ -436,10 +444,10 @@ class HarvestWorkerV2(QThread):
             except Exception:
                 pass
         self._live_result_handles = {}
-        self._generate_excel_copies(saved_paths)
+        self._generate_csv_copies(saved_paths)
 
-    def _generate_excel_copies(self, tsv_paths):
-        """Post-flight conversion of TSV to XLSX using stdlib only."""
+    def _generate_csv_copies(self, tsv_paths):
+        """Post-flight conversion of TSV to CSV for spreadsheet-friendly output."""
         import csv as _csv
         if not tsv_paths:
             return
@@ -449,10 +457,10 @@ class HarvestWorkerV2(QThread):
                 try:
                     with open(str(tsv_path), newline="", encoding="utf-8") as f:
                         rows = list(_csv.reader(f, delimiter="\t"))
-                    excel_path = tsv_path.with_suffix(".xlsx")
-                    _write_excel_autofit(rows, str(excel_path))
+                    csv_path = tsv_path.with_suffix(".csv")
+                    _write_csv_rows(rows, str(csv_path))
                 except Exception as e:
-                    print(f"Failed to convert {tsv_path.name} to Excel: {e}")
+                    print(f"Failed to convert {tsv_path.name} to CSV: {e}")
 
     def _append_live_row(self, bucket, row):
         fh = self._live_result_handles.get(bucket)
@@ -577,18 +585,20 @@ class HarvestWorkerV2(QThread):
             return ["NLM"]
         return ["LCCN"]
 
-    def _append_failed_attempt_row(self, isbn, attempt_type, target, reason):
+    def _append_failed_attempt_row(self, isbn, attempt_type, target, reason, attempted_date=None):
         normalized_isbn = str(isbn or "").replace("-", "").strip()
+        attempt_value = attempted_date or today_yyyymmdd()
         for label in self._failed_type_labels(attempt_type):
-            row = [label, normalized_isbn, target or "-", reason or "Unknown error"]
+            row = [label, normalized_isbn, target or "-", attempt_value, reason or "Unknown error"]
             self._session_failed.append(row)
             self._append_live_row("failed", row)
 
     def _append_retry_skip_rows(self, isbn, targets, attempt_type, reason):
         normalized_isbn = str(isbn or "").replace("-", "").strip()
+        attempt_value = today_yyyymmdd()
         for target_name in targets or ["RetryRule"]:
             for label in self._failed_type_labels(attempt_type):
-                row = [label, normalized_isbn, target_name or "RetryRule", reason]
+                row = [label, normalized_isbn, target_name or "RetryRule", attempt_value, reason]
                 self._session_failed.append(row)
                 self._append_live_row("failed", row)
 
@@ -1666,6 +1676,14 @@ class HarvestTabV2(QWidget):
             if self._config_getter
             else {"retry_days": 7, "call_number_mode": "lccn"}
         )
+
+        retry_days = int(config.get("retry_days", 7) or 0)
+        bypass_retry_isbns = self._check_recent_not_found_isbns(retry_days)
+        if bypass_retry_isbns is None:
+            self.log_output.setText(
+                "Harvest cancelled: retry window still active for some ISBNs."
+            )
+            return
         
         # Override call_number_mode based on UI selection
         mode_text = self.combo_run_mode.currentText()
@@ -1674,14 +1692,14 @@ class HarvestTabV2(QWidget):
             config["both_stop_policy"] = "nlmcn"
         elif mode_text == "Both (LCCN & NLM)":
             config["call_number_mode"] = "both"
+            stop_text = self.combo_stop_rule.currentText()
 
             # Read stop rule from the UI combo (no popup needed — user already chose)
-            stop_text = self.combo_stop_rule.currentText()
             stop_mapping = {
-                "Stop if either found":        ("stop_either", "either"),
-                "Stop if LCCN found":          ("stop_lccn",   "lccn"),
-                "Stop if NLMCN found":         ("stop_nlmcn",  "nlmcn"),
-                "Continue until both found":   ("continue_both", "both"),
+                "Stop if either found": ("stop_either", "either"),
+                "Stop if LCCN found": ("stop_lccn", "lccn"),
+                "Stop if NLMCN found": ("stop_nlmcn", "nlmcn"),
+                "Continue until both found": ("continue_both", "both"),
             }
             stop_rule_val, both_policy_val = stop_mapping.get(stop_text, ("stop_either", "either"))
             config["stop_rule"] = stop_rule_val
@@ -1698,14 +1716,6 @@ class HarvestTabV2(QWidget):
                 self,
                 "No Targets",
                 "Please select at least one target in the Targets tab.",
-            )
-            return
-
-        retry_days = int(config.get("retry_days", 7) or 0)
-        bypass_retry_isbns = self._check_recent_not_found_isbns(retry_days)
-        if bypass_retry_isbns is None:
-            self.log_output.setText(
-                "Harvest cancelled: retry window still active for some ISBNs."
             )
             return
 
@@ -1889,7 +1899,7 @@ class HarvestTabV2(QWidget):
                 matching_attempts = []
                 for att in attempted_rows:
                     err = (att.last_error or "").lower()
-                    if not self._is_retry_popup_candidate(err):
+                    if "invalid isbn" in err:
                         continue
                     if db.should_skip_retry(
                         isbn,
@@ -1908,7 +1918,7 @@ class HarvestTabV2(QWidget):
             return set()
 
         details = []
-        for isbn, att in recent[:12]:
+        for isbn, att in recent:
             last_attempted = att.last_attempted
             try:
                 last_val = str(last_attempted) if last_attempted is not None else ""
@@ -1931,9 +1941,6 @@ class HarvestTabV2(QWidget):
             details.append(
                 f"{isbn} | last not found: {last_str} | retry after: {next_str}"
             )
-        if len(recent) > 12:
-            details.append(f"... and {len(recent) - 12} more")
-
         msg = QMessageBox(self)
         msg.setIcon(QMessageBox.Icon.Warning)
         msg.setWindowTitle("Retry Date Not Reached")
@@ -1946,10 +1953,12 @@ class HarvestTabV2(QWidget):
         )
         msg.setDetailedText("\n".join(details))
 
-        cancel_btn = msg.addButton("Cancel Harvest", QMessageBox.ButtonRole.RejectRole)
-        msg.addButton("Continue (Keep Retry Rules)", QMessageBox.ButtonRole.AcceptRole)
         override_btn = msg.addButton(
             "Override and Re-run Now", QMessageBox.ButtonRole.ActionRole
+        )
+        cancel_btn = msg.addButton("Cancel Harvest", QMessageBox.ButtonRole.RejectRole)
+        continue_btn = msg.addButton(
+            "Continue (Keep Retry Rules)", QMessageBox.ButtonRole.AcceptRole
         )
         msg.setDefaultButton(cancel_btn)
         msg.exec()
@@ -1959,6 +1968,8 @@ class HarvestTabV2(QWidget):
             return None
         if clicked == override_btn:
             return {isbn for isbn, _ in recent}
+        if clicked == continue_btn:
+            return set()
         return set()
 
     def _is_retry_popup_candidate(self, error_text: str) -> bool:
@@ -1968,6 +1979,10 @@ class HarvestTabV2(QWidget):
         if "no lccn call number" in lowered:
             return True
         if "no nlmcn call number" in lowered:
+            return True
+        if "found " in lowered and " only; missing " in lowered:
+            return True
+        if "missing lccn" in lowered or "missing nlmcn" in lowered:
             return True
         return False
 

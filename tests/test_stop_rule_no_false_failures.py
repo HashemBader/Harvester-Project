@@ -51,11 +51,21 @@ def _run(orch):
 
 
 def _assert_no_false_failures(db, isbn="9780132350884"):
-    """After a success the attempted table must be empty for that ISBN."""
+    """After an early-stop success the attempted table must be empty for that ISBN."""
     remaining = db.get_all_attempted_for(isbn)
     assert remaining == [], (
         f"False failure rows found for {isbn}: {remaining}"
     )
+    main = db.get_main(isbn)
+    assert main is not None, f"Expected main record for {isbn}"
+    return main
+
+
+def _assert_partial_both_tracks_missing_type(db, isbn="9780132350884"):
+    """continue_both should retain the missing counterpart in attempted and keep the found partial in main."""
+    remaining = db.get_all_attempted_for(isbn)
+    assert len(remaining) == 1, f"Expected one missing-type attempt row, got {remaining}"
+    assert remaining[0].attempt_type == "nlmcn"
     main = db.get_main(isbn)
     assert main is not None, f"Expected main record for {isbn}"
     return main
@@ -137,9 +147,12 @@ def test_continue_both_partial_success_no_false_failure(tmp_path):
     db = DatabaseManager(tmp_path / "test.db")
     db.init_db()
     orch = _make_orch(db, [_LCCNOnlyTarget(), _FailTarget()], "continue_both", workers=1)
-    _run(orch)
-    # Ultimately a success (lccn found); no false failures
-    _assert_no_false_failures(db)
+    summary = _run(orch)
+    assert summary.successes == 0
+    assert summary.failures == 1
+    main = _assert_partial_both_tracks_missing_type(db)
+    assert main.lccn == "QA76"
+    assert main.nlmcn is None
 
 
 # ---------------------------------------------------------------------------
