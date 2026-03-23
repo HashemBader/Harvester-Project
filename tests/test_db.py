@@ -24,6 +24,40 @@ def test_db_init_and_main_roundtrip(tmp_path: Path):
     assert got.source == "LoC"
 
 
+def test_main_stores_one_row_per_call_number_type(tmp_path: Path):
+    import sqlite3 as _sqlite3
+
+    db_path = tmp_path / "test.sqlite3"
+    db = DatabaseManager(db_path)
+    db.init_db()
+
+    db.upsert_main(
+        MainRecord(
+            isbn="9780132350884",
+            lccn="QA76.76",
+            lccn_source="LoC",
+            nlmcn="W1 100",
+            nlmcn_source="NLM",
+        )
+    )
+
+    with _sqlite3.connect(str(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT isbn, call_number, call_number_type, source
+            FROM main
+            WHERE isbn = ?
+            ORDER BY call_number_type
+            """,
+            ("9780132350884",),
+        ).fetchall()
+
+    assert rows == [
+        ("9780132350884", "QA76.76", "lccn", "LoC"),
+        ("9780132350884", "W1 100", "nlmcn", "NLM"),
+    ]
+
+
 def test_attempted_upsert_increments_fail_count(tmp_path: Path):
     """fail_count increments are scoped to (isbn, target, type) — not global."""
     db_path = tmp_path / "test.sqlite3"

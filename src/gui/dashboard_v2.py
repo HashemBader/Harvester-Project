@@ -20,27 +20,15 @@ from .icons import (
 )
 
 
-def _write_excel_autofit(tsv_path: str, xlsx_path: str) -> None:
-    """Convert a TSV file to Excel with auto-fitted column widths using openpyxl only."""
+def _write_csv_copy(tsv_path: str, csv_path: str) -> None:
+    """Convert a TSV file to a UTF-8 CSV file for spreadsheet apps."""
     import csv
-    from openpyxl import Workbook
-    from openpyxl.utils import get_column_letter
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "Sheet1"
-
-    col_widths: dict[int, int] = {}
-    with open(tsv_path, newline="", encoding="utf-8") as f:
-        for row_idx, row in enumerate(csv.reader(f, delimiter="\t"), start=1):
-            for col_idx, value in enumerate(row, start=1):
-                ws.cell(row=row_idx, column=col_idx, value=value)
-                col_widths[col_idx] = max(col_widths.get(col_idx, 0), len(str(value)))
-
-    for col_idx, width in col_widths.items():
-        ws.column_dimensions[get_column_letter(col_idx)].width = min(width + 4, 80)
-
-    wb.save(xlsx_path)
+    with open(tsv_path, newline="", encoding="utf-8") as source:
+        rows = csv.reader(source, delimiter="\t")
+        with open(csv_path, "w", newline="", encoding="utf-8-sig") as target:
+            writer = csv.writer(target)
+            writer.writerows(rows)
 
 
 def _safe_filename(s: str) -> str:
@@ -349,7 +337,7 @@ class DashboardTabV2(QWidget):
         # Format Switch
         self.format_combo = ConsistentComboBox(popup_object_name="ResultFormatComboPopup", max_visible_items=2)
         self.format_combo.setObjectName("ResultFormatCombo")
-        self.format_combo.addItems(["TSV (.tsv)", "Excel (.xlsx)"])
+        self.format_combo.addItems(["TSV (.tsv)", "CSV (.csv)"])
         self.format_combo.setToolTip("Select the file format to open")
         self.format_combo.currentTextChanged.connect(self._refresh_result_file_buttons)
         header.addWidget(self.format_combo)
@@ -426,8 +414,8 @@ class DashboardTabV2(QWidget):
             "problems": self.btn_open_problems,
         }
         
-        is_excel = getattr(self, "format_combo", None) and self.format_combo.currentText().startswith("Excel")
-        ext = ".xlsx" if is_excel else ".tsv"
+        is_csv = getattr(self, "format_combo", None) and self.format_combo.currentText().startswith("CSV")
+        ext = ".csv" if is_csv else ".tsv"
         
         for key, btn in mapping.items():
             path = self.result_files.get(key)
@@ -435,9 +423,8 @@ class DashboardTabV2(QWidget):
                 # Check for the correct extension file
                 check_path = path.with_suffix(ext)
                 
-                # If Excel is requested but not finalized, we can enable the button as long as the base TSV exists
-                # It will be generated on the fly when clicked!
-                if is_excel:
+                # If CSV is requested but not finalized, we can enable the button as long as the base TSV exists.
+                if is_csv:
                     enabled = path.exists() 
                 else:
                     enabled = check_path.exists()
@@ -454,16 +441,16 @@ class DashboardTabV2(QWidget):
 
     def _open_result_file(self, key):
         path = self.result_files[key]
-        is_excel = getattr(self, "format_combo", None) and self.format_combo.currentText().startswith("Excel")
-        ext = ".xlsx" if is_excel else ".tsv"
+        is_csv = getattr(self, "format_combo", None) and self.format_combo.currentText().startswith("CSV")
+        ext = ".csv" if is_csv else ".tsv"
         target_path = path.with_suffix(ext)
 
-        # Generate on the fly if it's Excel mid-harvest
-        if is_excel and not target_path.exists() and path.exists():
+        # Generate on the fly if CSV is selected mid-harvest.
+        if is_csv and not target_path.exists() and path.exists():
             try:
-                _write_excel_autofit(str(path), str(target_path))
+                _write_csv_copy(str(path), str(target_path))
             except Exception as e:
-                QMessageBox.warning(self, "Excel Not Ready", f"Could not generate live Excel view:\n{e}")
+                QMessageBox.warning(self, "CSV Not Ready", f"Could not generate live CSV view:\n{e}")
                 return
 
         if not target_path.exists():

@@ -8,14 +8,13 @@ PRAGMA foreign_keys = ON;
 -- Main results table
 -- =========================
 CREATE TABLE IF NOT EXISTS main (
-    isbn            TEXT PRIMARY KEY,
-    lccn            TEXT,
-    lccn_source     TEXT,
-    nlmcn           TEXT,
-    nlmcn_source    TEXT,
+    isbn            TEXT NOT NULL,
+    call_number     TEXT NOT NULL,
+    call_number_type TEXT NOT NULL, -- 'lccn' or 'nlmcn'
     classification  TEXT,
     source          TEXT,
-    date_added      INTEGER NOT NULL  -- yyyymmdd (e.g. 20260317)
+    date_added      INTEGER NOT NULL, -- yyyymmdd (e.g. 20260317)
+    PRIMARY KEY (isbn, call_number_type)
 );
 
 CREATE INDEX IF NOT EXISTS idx_main_source ON main(source);

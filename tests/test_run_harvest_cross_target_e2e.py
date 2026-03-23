@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+import sqlite3
 
 from src.database import DatabaseManager
 from src.harvester.orchestrator import HarvestOrchestrator, ProcessOutcome, TargetResult
@@ -79,6 +80,18 @@ def test_full_run_cross_target_sources_dates_stop_rule_and_process_outcome(tmp_p
     assert isinstance(dt.month, int) and 1 <= dt.month <= 12
     assert isinstance(dt.day, int) and 1 <= dt.day <= 31
 
+    with sqlite3.connect(str(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT call_number_type, call_number, source
+            FROM main
+            WHERE isbn = ?
+            ORDER BY call_number_type
+            """,
+            (isbn,),
+        ).fetchall()
+    assert rows == [("lccn", "QA76.73", "LoC-A"), ("nlmcn", "W1 1234", "NLM-B")]
+
     assert db.get_all_attempted_for(isbn) == []
 
     orch = HarvestOrchestrator(
@@ -123,6 +136,18 @@ def test_full_run_cross_target_missing_source_falls_back_to_target_name(tmp_path
     assert record.lccn_source == "LoC-A"
     assert record.nlmcn_source == "TargetB"
     assert record.source == "LoC-A + TargetB"
+
+    with sqlite3.connect(str(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT call_number_type, source
+            FROM main
+            WHERE isbn = ?
+            ORDER BY call_number_type
+            """,
+            (isbn,),
+        ).fetchall()
+    assert rows == [("lccn", "LoC-A"), ("nlmcn", "TargetB")]
 
     orch = HarvestOrchestrator(
         db=db,
