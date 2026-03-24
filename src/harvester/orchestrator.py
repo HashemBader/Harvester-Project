@@ -247,13 +247,22 @@ class HarvestOrchestrator:
     def _type_label(call_number_type: str) -> str:
         return "LCCN" if call_number_type == "lccn" else "NLMCN"
 
-    def _emit_attempt_failure(self, *, isbn: str, target: str, call_number_type: str, reason: str) -> None:
+    def _emit_attempt_failure(
+        self,
+        *,
+        isbn: str,
+        target: str,
+        call_number_type: str,
+        reason: str,
+        attempted_date: Optional[int] = None,
+    ) -> None:
         self._emit(
             "attempt_failed",
             {
                 "isbn": isbn,
                 "target": target,
                 "attempt_type": call_number_type,
+                "attempted_date": attempted_date or today_yyyymmdd(),
                 "reason": reason,
             },
         )
@@ -411,11 +420,18 @@ class HarvestOrchestrator:
                     isbn=isbn,
                     target=last_target,
                     call_number_type=call_number_type,
+                    attempted_date=attempt_time,
                     reason=reason,
                 )
 
-        # Check if we accumulated any success
-        if best_lccn or best_nlmcn:
+        has_partial_result = bool(best_lccn or best_nlmcn)
+        requires_both_for_success = (
+            self.call_number_mode == "both" and self.stop_rule == "continue_both"
+        )
+        has_complete_result = self._should_stop_with_found(bool(best_lccn), bool(best_nlmcn))
+
+        # Check if we accumulated a fully successful result.
+        if has_partial_result and (not requires_both_for_success or has_complete_result):
             rec = self._build_record(
                 isbn=isbn,
                 lccn=best_lccn,
@@ -433,6 +449,45 @@ class HarvestOrchestrator:
                 pending_attempted.extend(attempted_rows)
 
             return ProcessOutcome("success", rec, tuple(attempted_rows))
+
+        if has_partial_result:
+            rec = self._build_record(
+                isbn=isbn,
+                lccn=best_lccn,
+                lccn_source=best_lccn_source,
+                nlmcn=best_nlmcn,
+                nlmcn_source=best_nlmcn_source,
+            )
+            found_labels = []
+            missing_labels = []
+            if best_lccn:
+                found_labels.append("LCCN")
+            else:
+                missing_labels.append("LCCN")
+            if best_nlmcn:
+                found_labels.append("NLMCN")
+            else:
+                missing_labels.append("NLMCN")
+            last_error = (
+                f"Found {' and '.join(found_labels)} only; missing {' and '.join(missing_labels)}"
+            )
+
+            if not dry_run:
+                pending_main.append(rec)
+                if attempted_rows:
+                    pending_attempted.extend(attempted_rows)
+
+            self._emit(
+                "failed",
+                self._build_failed_payload(
+                    isbn=isbn,
+                    last_target=last_target,
+                    last_error=last_error,
+                    not_found_targets=not_found_targets,
+                    other_errors=other_errors,
+                ),
+            )
+            return ProcessOutcome("failed", rec if dry_run else None, tuple(attempted_rows))
 
         if skipped_retry_targets and not not_found_targets and not other_errors:
             self._emit(
@@ -509,14 +564,20 @@ class HarvestOrchestrator:
             if not pending_main and not pending_attempted:
                 return
 
-            # ISBNs that succeeded in this batch — don't write failure rows for them.
-            # upsert_main_many already clears old attempted rows via clear_attempted_on_success,
-            # but without this filter upsert_attempted_many would immediately re-insert the
-            # intermediate per-target failures recorded before the early-stop success hit.
-            successful_isbns = {r.isbn for r in pending_main}
-            filtered_attempted = [
-                row for row in pending_attempted if row[0] not in successful_isbns
-            ]
+            if self.call_number_mode == "both" and self.stop_rule != "continue_both":
+                successful_isbns = {record.isbn for record in pending_main}
+                filtered_attempted = [
+                    row for row in pending_attempted if row[0] not in successful_isbns
+                ]
+            else:
+                successful_pairs = {
+                    (record.isbn, call_type)
+                    for record in pending_main
+                    for call_type in self.db._record_success_types(record)
+                }
+                filtered_attempted = [
+                    row for row in pending_attempted if (row[0], row[2]) not in successful_pairs
+                ]
 
             wrote_attempted = len(filtered_attempted)
 
@@ -578,16 +639,27 @@ class HarvestOrchestrator:
                 self._emit("isbn_start", {"isbn": isbn})
 
                 cached_rec = None
+                found_lccn: Optional[str] = None
+                found_lccn_source: Optional[str] = None
+                found_nlmcn: Optional[str] = None
+                found_nlmcn_source: Optional[str] = None
                 if isbn not in self.bypass_cache_isbns:
                     cached_rec = self.db.get_main(isbn)
                 if cached_rec is not None:
-                    self._emit("cached", {
-                        "isbn": isbn,
-                        "source": cached_rec.source,
-                        "lccn": cached_rec.lccn,
-                        "nlmcn": cached_rec.nlmcn,
-                    })
-                    return ("cached", None, None)
+                    found_lccn = cached_rec.lccn
+                    found_lccn_source = getattr(cached_rec, "lccn_source", None) or cached_rec.source
+                    found_nlmcn = cached_rec.nlmcn
+                    found_nlmcn_source = getattr(cached_rec, "nlmcn_source", None) or cached_rec.source
+                    if self._should_stop_with_found(bool(found_lccn), bool(found_nlmcn)):
+                        self._emit("cached", {
+                            "isbn": isbn,
+                            "source": cached_rec.source,
+                            "lccn": cached_rec.lccn,
+                            "lccn_source": found_lccn_source,
+                            "nlmcn": cached_rec.nlmcn,
+                            "nlmcn_source": found_nlmcn_source,
+                        })
+                        return ("cached", None, None)
 
                 last_error = None
                 last_target = None
@@ -597,27 +669,35 @@ class HarvestOrchestrator:
                 attempted_rows: list[tuple[str, Optional[str], str, Optional[int], Optional[str]]] = []
 
                 # Accumulate best results and apply stop_rule (mirrors process_isbn)
-                best_lccn: Optional[str] = None
-                best_lccn_source: Optional[str] = None
-                best_nlmcn: Optional[str] = None
-                best_nlmcn_source: Optional[str] = None
+                best_lccn: Optional[str] = found_lccn
+                best_lccn_source: Optional[str] = found_lccn_source
+                best_nlmcn: Optional[str] = found_nlmcn
+                best_nlmcn_source: Optional[str] = found_nlmcn_source
 
                 for target in self.targets:
                     self._check_cancelled()
                     last_target = getattr(target, "name", target.__class__.__name__)
+                    required_types = self._required_types(bool(best_lccn), bool(best_nlmcn))
+                    if not required_types:
+                        break
 
-                    if isbn not in self.bypass_retry_isbns and self.db.should_skip_retry(
-                        isbn,
-                        last_target,
-                        self.call_number_mode,
-                        retry_days=self.retry_days,
+                    if isbn not in self.bypass_retry_isbns and all(
+                        self.db.should_skip_retry(
+                            isbn,
+                            last_target,
+                            call_number_type,
+                            retry_days=self.retry_days,
+                        )
+                        for call_number_type in required_types
                     ):
                         skipped_retry_targets.append(last_target)
                         continue
 
                     self._emit("target_start", {"isbn": isbn, "target": last_target})
 
-                    result = self._filter_result_by_mode(target.lookup(isbn))
+                    raw_result = target.lookup(isbn)
+                    attempt_time = today_yyyymmdd()
+                    result = self._filter_result_by_mode(raw_result) if self.call_number_mode != "both" else raw_result
                     if result.success:
                         if result.lccn and not best_lccn:
                             best_lccn = result.lccn
@@ -651,10 +731,24 @@ class HarvestOrchestrator:
                         not_found_targets.append(last_target)
                     elif err:
                         other_errors.append((last_target, err))
-                    if not dry_run:
-                        attempted_rows.append((isbn, last_target, self.call_number_mode, today_yyyymmdd(), last_error))
+                    for call_number_type in required_types:
+                        reason = err or f"No {self._type_label(call_number_type)} call number"
+                        attempted_rows.append((isbn, last_target, call_number_type, attempt_time, reason))
+                        self._emit_attempt_failure(
+                            isbn=isbn,
+                            target=last_target,
+                            call_number_type=call_number_type,
+                            attempted_date=attempt_time,
+                            reason=reason,
+                        )
 
-                if best_lccn or best_nlmcn:
+                has_partial_result = bool(best_lccn or best_nlmcn)
+                requires_both_for_success = (
+                    self.call_number_mode == "both" and self.stop_rule == "continue_both"
+                )
+                has_complete_result = self._should_stop_with_found(bool(best_lccn), bool(best_nlmcn))
+
+                if has_partial_result and (not requires_both_for_success or has_complete_result):
                     rec = self._build_record(
                         isbn=isbn,
                         lccn=best_lccn,
@@ -665,8 +759,39 @@ class HarvestOrchestrator:
                     self._emit_result("success", isbn=isbn, target=rec.source or "Unknown", record=rec)
                     if dry_run:
                         rec = None
-                    # Don't pass attempted_rows — successes drop intermediate failures
-                    return ("success", rec, None)
+                    return ("success", rec, attempted_rows)
+
+                if has_partial_result:
+                    rec = self._build_record(
+                        isbn=isbn,
+                        lccn=best_lccn,
+                        lccn_source=best_lccn_source,
+                        nlmcn=best_nlmcn,
+                        nlmcn_source=best_nlmcn_source,
+                    )
+                    found_labels = []
+                    missing_labels = []
+                    if best_lccn:
+                        found_labels.append("LCCN")
+                    else:
+                        missing_labels.append("LCCN")
+                    if best_nlmcn:
+                        found_labels.append("NLMCN")
+                    else:
+                        missing_labels.append("NLMCN")
+                    last_error = (
+                        f"Found {' and '.join(found_labels)} only; missing {' and '.join(missing_labels)}"
+                    )
+
+                    self._emit("failed", self._build_failed_payload(
+                        isbn=isbn,
+                        last_target=last_target,
+                        last_error=last_error,
+                        not_found_targets=not_found_targets,
+                        other_errors=other_errors,
+                    ))
+
+                    return ("failed", rec if dry_run else rec, attempted_rows)
 
                 if skipped_retry_targets and not not_found_targets and not other_errors:
                     self._emit(

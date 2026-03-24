@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -22,6 +23,35 @@ def utc_now_iso() -> str:
 def today_yyyymmdd() -> int:
     """Return today's local date as a yyyymmdd integer (e.g. 20260317)."""
     return int(datetime.now().strftime("%Y%m%d"))
+
+
+def normalize_to_yyyymmdd(value: Optional[int | str]) -> Optional[int]:
+    """Convert supported date values to a yyyymmdd integer."""
+    if value in (None, ""):
+        return None
+    if isinstance(value, int):
+        return value
+
+    text = str(value).strip()
+    if not text:
+        return None
+    if len(text) == 8 and text.isdigit():
+        return int(text)
+
+    dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    return int(dt.strftime("%Y%m%d"))
+
+
+def yyyymmdd_to_iso_date(value: Optional[int | str]) -> Optional[str]:
+    """Convert yyyymmdd storage values into an ISO date string."""
+    if value in (None, ""):
+        return None
+
+    text = str(value).strip()
+    if len(text) == 8 and text.isdigit():
+        return f"{text[:4]}-{text[4:6]}-{text[6:8]}"
+
+    return text
 
 
 def classification_from_lccn(lccn: Optional[str]) -> Optional[str]:
@@ -51,7 +81,7 @@ class MainRecord:
     nlmcn_source: Optional[str] = None
     classification: Optional[str] = None
     source: Optional[str] = None
-    date_added: Optional[int] = None  # yyyymmdd integer (e.g. 20260317)
+    date_added: Optional[int | str] = None  # stored as yyyymmdd, returned compatibly for callers
 
 
 @dataclass(frozen=True)
@@ -76,6 +106,51 @@ class DatabaseManager:
 
     def __init__(self, db_path: Path | str = "data/lccn_harvester.sqlite3"):
         self.db_path = Path(db_path)
+
+    @staticmethod
+    def _default_schema_path() -> Path:
+        """Resolve the bundled schema path in both source and frozen runs."""
+        module_path = Path(__file__).resolve()
+        candidates: list[Path] = [module_path.with_name("schema.sql")]
+
+        # PyInstaller can place imported modules under either
+        # ``.../Frameworks/database`` or ``.../Frameworks/src/database`` on macOS.
+        # Walk a couple of ancestor layouts so the frozen app can still find the
+        # bundled schema even if ``__file__`` shifts between those structures.
+        for parent_index in (1, 2, 3):
+            try:
+                candidates.append(module_path.parents[parent_index] / "database" / "schema.sql")
+            except IndexError:
+                break
+
+        if getattr(sys, "frozen", False):
+            try:
+                from config.app_paths import get_bundle_root
+                bundle_root = get_bundle_root()
+                candidates.extend(
+                    [
+                        bundle_root / "database" / "schema.sql",
+                        bundle_root / "src" / "database" / "schema.sql",
+                    ]
+                )
+            except Exception:
+                pass
+
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                root = Path(meipass)
+                candidates.extend(
+                    [
+                        root / "database" / "schema.sql",
+                        root / "src" / "database" / "schema.sql",
+                    ]
+                )
+
+        for path in candidates:
+            if path.exists():
+                return path
+
+        return candidates[0]
 
     @contextmanager
     def connect(self):
@@ -142,7 +217,7 @@ class DatabaseManager:
         If the database file is corrupt, it is automatically deleted and recreated.
         """
         if schema_path is None:
-            schema_path = Path(__file__).with_name("schema.sql")
+            schema_path = self._default_schema_path()
 
         # Auto-repair: if the existing file is malformed, wipe and start fresh
         if not self._is_db_healthy():
@@ -155,30 +230,106 @@ class DatabaseManager:
         schema_sql = schema_path.read_text(encoding="utf-8")
 
         with self.connect() as conn:
-            conn.executescript(schema_sql)
+            try:
+                conn.executescript(schema_sql)
+            except sqlite3.OperationalError as exc:
+                # Older deployments may already have a legacy ``main`` table whose
+                # columns do not match the current schema. In that case the schema
+                # script can fail while creating indexes before our Python
+                # migrations get a chance to run.
+                if "no such column" not in str(exc).lower():
+                    raise
+                self._migrate_main_schema_if_needed(conn)
+                self._migrate_attempted_schema_if_needed(conn)
+                self._migrate_linked_isbns_schema_if_needed(conn)
+                conn.executescript(schema_sql)
             self._migrate_main_schema_if_needed(conn)
             self._migrate_attempted_schema_if_needed(conn)
+            self._migrate_linked_isbns_schema_if_needed(conn)
             self._migrate_dates_to_yyyymmdd(conn)
 
     def _migrate_main_schema_if_needed(self, conn: sqlite3.Connection) -> None:
-        """Ensure main table has per-type source columns."""
+        """Ensure main table uses the MVP per-ISBN+type schema."""
         cols = conn.execute("PRAGMA table_info(main)").fetchall()
         if not cols:
             return
 
         col_names = {row["name"] for row in cols}
-        if "lccn_source" not in col_names:
-            conn.execute("ALTER TABLE main ADD COLUMN lccn_source TEXT")
-            conn.execute(
-                "UPDATE main SET lccn_source = source WHERE lccn IS NOT NULL AND lccn_source IS NULL"
+        if "call_number_type" in col_names and "call_number" in col_names:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_main_source ON main(source)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_main_date_added ON main(date_added)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_main_type ON main(call_number_type)")
+            return
+
+        conn.execute("ALTER TABLE main RENAME TO main_legacy")
+        conn.execute(
+            """
+            CREATE TABLE main (
+                isbn             TEXT NOT NULL,
+                call_number      TEXT NOT NULL,
+                call_number_type TEXT NOT NULL,
+                classification   TEXT,
+                source           TEXT,
+                date_added       INTEGER NOT NULL,
+                PRIMARY KEY (isbn, call_number_type)
             )
-        if "nlmcn_source" not in col_names:
-            conn.execute("ALTER TABLE main ADD COLUMN nlmcn_source TEXT")
-            conn.execute(
-                "UPDATE main SET nlmcn_source = source WHERE nlmcn IS NOT NULL AND nlmcn_source IS NULL"
-            )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_main_lccn_source ON main(lccn_source)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_main_nlmcn_source ON main(nlmcn_source)")
+            """
+        )
+
+        def _legacy_select(name: str) -> str:
+            return name if name in col_names else f"NULL AS {name}"
+
+        legacy_rows = conn.execute(
+            f"""
+            SELECT
+                {_legacy_select("isbn")},
+                {_legacy_select("lccn")},
+                {_legacy_select("lccn_source")},
+                {_legacy_select("nlmcn")},
+                {_legacy_select("nlmcn_source")},
+                {_legacy_select("classification")},
+                {_legacy_select("source")},
+                {_legacy_select("date_added")}
+            FROM main_legacy
+            """
+        ).fetchall()
+        for row in legacy_rows:
+            date_added = normalize_to_yyyymmdd(row["date_added"]) or today_yyyymmdd()
+            if row["lccn"]:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO main
+                        (isbn, call_number, call_number_type, classification, source, date_added)
+                    VALUES (?, ?, 'lccn', ?, ?, ?)
+                    """,
+                    (
+                        row["isbn"],
+                        row["lccn"],
+                        row["classification"] or classification_from_lccn(row["lccn"]),
+                        row["lccn_source"] if "lccn_source" in row.keys() else row["source"],
+                        date_added,
+                    ),
+                )
+            if row["nlmcn"]:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO main
+                        (isbn, call_number, call_number_type, classification, source, date_added)
+                    VALUES (?, ?, 'nlmcn', ?, ?, ?)
+                    """,
+                    (
+                        row["isbn"],
+                        row["nlmcn"],
+                        None,
+                        row["nlmcn_source"] if "nlmcn_source" in row.keys() else row["source"],
+                        date_added,
+                    ),
+                )
+
+        conn.execute("DROP TABLE main_legacy")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_main_source ON main(source)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_main_date_added ON main(date_added)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_main_type ON main(call_number_type)")
 
     def _migrate_attempted_schema_if_needed(self, conn: sqlite3.Connection) -> None:
         """
@@ -227,6 +378,77 @@ class DatabaseManager:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_attempted_last_attempted ON attempted(last_attempted)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_attempted_last_target ON attempted(last_target)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_attempted_isbn ON attempted(isbn)")
+
+    def _migrate_linked_isbns_schema_if_needed(self, conn: sqlite3.Connection) -> None:
+        """Ensure linked_isbns uses lowest/other columns and preserves legacy mappings."""
+        cols = conn.execute("PRAGMA table_info(linked_isbns)").fetchall()
+        if not cols:
+            return
+
+        col_names = {row["name"] for row in cols}
+        pk_cols = [row["name"] for row in sorted(cols, key=lambda row: int(row["pk"])) if int(row["pk"]) > 0]
+        desired_pk = ["lowest_isbn", "other_isbn"]
+        has_other_unique = False
+        for idx in conn.execute("PRAGMA index_list(linked_isbns)").fetchall():
+            if int(idx["unique"]) != 1:
+                continue
+            index_name = idx["name"]
+            indexed_cols = [
+                row["name"]
+                for row in conn.execute(f"PRAGMA index_info({index_name})").fetchall()
+            ]
+            if indexed_cols == ["other_isbn"]:
+                has_other_unique = True
+                break
+
+        if {"lowest_isbn", "other_isbn"}.issubset(col_names) and pk_cols == desired_pk and has_other_unique:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_linked_lowest ON linked_isbns(lowest_isbn)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_linked_other ON linked_isbns(other_isbn)")
+            return
+
+        conn.execute("ALTER TABLE linked_isbns RENAME TO linked_isbns_legacy")
+        conn.execute(
+            """
+            CREATE TABLE linked_isbns (
+                lowest_isbn      TEXT NOT NULL,
+                other_isbn       TEXT NOT NULL UNIQUE,
+                PRIMARY KEY (lowest_isbn, other_isbn),
+                CHECK (lowest_isbn <> other_isbn)
+            )
+            """
+        )
+
+        def _legacy_select(name: str) -> str:
+            return name if name in col_names else f"NULL AS {name}"
+
+        legacy_rows = conn.execute(
+            f"""
+            SELECT
+                {_legacy_select("lowest_isbn")},
+                {_legacy_select("other_isbn")},
+                {_legacy_select("isbn")},
+                {_legacy_select("canonical_isbn")}
+            FROM linked_isbns_legacy
+            """
+        ).fetchall()
+        for row in legacy_rows:
+            lowest_isbn = (row["lowest_isbn"] or row["canonical_isbn"] or "").strip()
+            other_isbn = (row["other_isbn"] or row["isbn"] or "").strip()
+            if not lowest_isbn or not other_isbn or lowest_isbn == other_isbn:
+                continue
+            conn.execute(
+                """
+                INSERT INTO linked_isbns (lowest_isbn, other_isbn)
+                VALUES (?, ?)
+                ON CONFLICT(other_isbn) DO UPDATE SET
+                    lowest_isbn = excluded.lowest_isbn
+                """,
+                (lowest_isbn, other_isbn),
+            )
+
+        conn.execute("DROP TABLE linked_isbns_legacy")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_linked_lowest ON linked_isbns(lowest_isbn)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_linked_other ON linked_isbns(other_isbn)")
 
     def _migrate_dates_to_yyyymmdd(self, conn: sqlite3.Connection) -> None:
         """
@@ -333,30 +555,96 @@ class DatabaseManager:
     # -------------------------
     # MAIN TABLE HELPERS
     # -------------------------
-    def get_main(self, isbn: str) -> Optional[MainRecord]:
-        with self.connect() as conn:
-            row = conn.execute(
-                """
-                SELECT isbn, lccn, lccn_source, nlmcn, nlmcn_source, classification, source, date_added
-                FROM main
-                WHERE isbn = ?
-                """,
-                (isbn,),
-            ).fetchone()
+    @staticmethod
+    def _record_success_types(record: MainRecord) -> tuple[str, ...]:
+        types: list[str] = []
+        if record.lccn:
+            types.append("lccn")
+        if record.nlmcn:
+            types.append("nlmcn")
+        return tuple(types)
 
-        if not row:
+    @staticmethod
+    def _aggregate_main_rows(rows: Sequence[sqlite3.Row]) -> Optional[MainRecord]:
+        if not rows:
             return None
 
+        isbn = rows[0]["isbn"]
+        lccn = None
+        lccn_source = None
+        nlmcn = None
+        nlmcn_source = None
+        classification = None
+        sources: list[str] = []
+        latest_date: Optional[int | str] = None
+
+        for row in rows:
+            call_type = str(row["call_number_type"] or "").strip().lower()
+            call_number = row["call_number"]
+            source = row["source"]
+            if source and source not in sources:
+                sources.append(source)
+            latest_date = row["date_added"]
+            if call_type == "lccn":
+                lccn = call_number
+                lccn_source = source
+                classification = row["classification"] or classification_from_lccn(call_number)
+            elif call_type == "nlmcn":
+                nlmcn = call_number
+                nlmcn_source = source
+
         return MainRecord(
-            isbn=row["isbn"],
-            lccn=row["lccn"],
-            lccn_source=row["lccn_source"] if "lccn_source" in row.keys() else row["source"],
-            nlmcn=row["nlmcn"],
-            nlmcn_source=row["nlmcn_source"] if "nlmcn_source" in row.keys() else row["source"],
-            classification=row["classification"],
-            source=row["source"],
-            date_added=row["date_added"],
+            isbn=isbn,
+            lccn=lccn,
+            lccn_source=lccn_source,
+            nlmcn=nlmcn,
+            nlmcn_source=nlmcn_source,
+            classification=classification,
+            source=DatabaseManager._combine_sources(*sources),
+            date_added=yyyymmdd_to_iso_date(latest_date),
         )
+
+    @staticmethod
+    def _explode_main_record(record: MainRecord) -> list[tuple[str, str, str, Optional[str], Optional[str], int]]:
+        date_added = normalize_to_yyyymmdd(record.date_added) or today_yyyymmdd()
+        rows: list[tuple[str, str, str, Optional[str], Optional[str], int]] = []
+        if record.lccn:
+            rows.append(
+                (
+                    record.isbn,
+                    record.lccn,
+                    "lccn",
+                    record.classification or classification_from_lccn(record.lccn),
+                    record.lccn_source or record.source,
+                    date_added,
+                )
+            )
+        if record.nlmcn:
+            rows.append(
+                (
+                    record.isbn,
+                    record.nlmcn,
+                    "nlmcn",
+                    None,
+                    record.nlmcn_source or record.source,
+                    date_added,
+                )
+            )
+        return rows
+
+    def get_main(self, isbn: str) -> Optional[MainRecord]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT isbn, call_number, call_number_type, classification, source, date_added
+                FROM main
+                WHERE isbn = ?
+                ORDER BY call_number_type
+                """,
+                (isbn,),
+            ).fetchall()
+
+        return self._aggregate_main_rows(rows)
 
     def upsert_main(self, record: MainRecord, *, clear_attempted_on_success: bool = True) -> None:
         with self.transaction() as conn:
@@ -373,34 +661,22 @@ class DatabaseManager:
         if not records:
             return
 
-        rows: list[tuple] = []
-        isbns: list[str] = []
+        rows: list[tuple[str, str, str, Optional[str], Optional[str], int]] = []
+        successful_pairs: list[tuple[str, str]] = []
         for r in records:
-            date_added = r.date_added or today_yyyymmdd()
-            classification = r.classification or classification_from_lccn(r.lccn)
-            rows.append(
-                (
-                    r.isbn,
-                    r.lccn,
-                    r.lccn_source or r.source,
-                    r.nlmcn,
-                    r.nlmcn_source or r.source,
-                    classification,
-                    self._combine_sources(r.lccn_source or r.source, r.nlmcn_source or r.source),
-                    date_added,
-                )
-            )
-            isbns.append(r.isbn)
+            exploded = self._explode_main_record(r)
+            rows.extend(exploded)
+            successful_pairs.extend((r.isbn, call_number_type) for _, _, call_number_type, _, _, _ in exploded)
+
+        if not rows:
+            return
 
         conn.executemany(
             """
-            INSERT INTO main (isbn, lccn, lccn_source, nlmcn, nlmcn_source, classification, source, date_added)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(isbn) DO UPDATE SET
-                lccn = excluded.lccn,
-                lccn_source = excluded.lccn_source,
-                nlmcn = excluded.nlmcn,
-                nlmcn_source = excluded.nlmcn_source,
+            INSERT INTO main (isbn, call_number, call_number_type, classification, source, date_added)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(isbn, call_number_type) DO UPDATE SET
+                call_number = excluded.call_number,
                 classification = excluded.classification,
                 source = excluded.source,
                 date_added = excluded.date_added
@@ -409,7 +685,7 @@ class DatabaseManager:
         )
 
         if clear_attempted_on_success:
-            self.clear_attempted_many(conn, isbns)
+            self.clear_attempted_pairs_many(conn, successful_pairs)
 
     def _upsert_main_conn(
         self,
@@ -418,40 +694,173 @@ class DatabaseManager:
         *,
         clear_attempted_on_success: bool,
     ) -> None:
-        date_added = record.date_added or today_yyyymmdd()
-        classification = record.classification or classification_from_lccn(record.lccn)
-        source = self._combine_sources(
-            record.lccn_source or record.source,
-            record.nlmcn_source or record.source,
-        )
+        self.upsert_main_many(conn, [record], clear_attempted_on_success=clear_attempted_on_success)
+
+    # -------------------------
+    # LINKED ISBN HELPERS
+    # -------------------------
+    def get_lowest_isbn(self, isbn: str) -> str:
+        """Return the canonical lowest ISBN for *isbn*, or the ISBN itself if unlinked."""
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT lowest_isbn
+                FROM linked_isbns
+                WHERE other_isbn = ?
+                LIMIT 1
+                """,
+                (isbn,),
+            ).fetchone()
+        if row and row["lowest_isbn"]:
+            return str(row["lowest_isbn"])
+        return isbn
+
+    def get_linked_isbns(self, lowest_isbn: str) -> list[str]:
+        """Return all ISBNs linked to the supplied canonical lowest ISBN."""
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT other_isbn
+                FROM linked_isbns
+                WHERE lowest_isbn = ?
+                ORDER BY other_isbn
+                """,
+                (lowest_isbn,),
+            ).fetchall()
+        return [str(row["other_isbn"]) for row in rows]
+
+    def upsert_linked_isbn(self, *, lowest_isbn: str, other_isbn: str) -> None:
+        """Insert or update a linked ISBN mapping."""
+        with self.transaction() as conn:
+            self._upsert_linked_isbn_conn(conn, lowest_isbn=lowest_isbn, other_isbn=other_isbn)
+
+    def _upsert_linked_isbn_conn(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        lowest_isbn: str,
+        other_isbn: str,
+    ) -> None:
+        lowest_isbn = (lowest_isbn or "").strip()
+        other_isbn = (other_isbn or "").strip()
+        if not lowest_isbn or not other_isbn:
+            raise ValueError("lowest_isbn and other_isbn are required")
+        if lowest_isbn == other_isbn:
+            raise ValueError("lowest_isbn and other_isbn must be different")
 
         conn.execute(
             """
-            INSERT INTO main (isbn, lccn, lccn_source, nlmcn, nlmcn_source, classification, source, date_added)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(isbn) DO UPDATE SET
-                lccn = excluded.lccn,
-                lccn_source = excluded.lccn_source,
-                nlmcn = excluded.nlmcn,
-                nlmcn_source = excluded.nlmcn_source,
-                classification = excluded.classification,
-                source = excluded.source,
-                date_added = excluded.date_added
+            INSERT INTO linked_isbns (lowest_isbn, other_isbn)
+            VALUES (?, ?)
+            ON CONFLICT(other_isbn) DO UPDATE SET
+                lowest_isbn = excluded.lowest_isbn
             """,
-            (
-                record.isbn,
-                record.lccn,
-                record.lccn_source or record.source,
-                record.nlmcn,
-                record.nlmcn_source or record.source,
-                classification,
-                source,
-                date_added,
-            ),
+            (lowest_isbn, other_isbn),
         )
 
-        if clear_attempted_on_success:
-            conn.execute("DELETE FROM attempted WHERE isbn = ?", (record.isbn,))
+    def rewrite_to_lowest_isbn(self, *, lowest_isbn: str, other_isbn: str) -> None:
+        """Move main/attempted rows from *other_isbn* to *lowest_isbn* and record the link."""
+        lowest_isbn = (lowest_isbn or "").strip()
+        other_isbn = (other_isbn or "").strip()
+        if not lowest_isbn or not other_isbn:
+            raise ValueError("lowest_isbn and other_isbn are required")
+        if lowest_isbn == other_isbn:
+            return
+
+        with self.connect() as conn:
+            # ``subjects`` still uses a legacy FK against ``main(isbn)`` while
+            # ``main`` now has a composite primary key. Temporarily disabling FK
+            # enforcement for this connection avoids a false mismatch during the
+            # row rewrite; the connection is short-lived and closes immediately
+            # after the rewrite completes.
+            conn.execute("PRAGMA foreign_keys = OFF;")
+            moved_main_rows = conn.execute(
+                """
+                SELECT call_number, call_number_type, classification, source, date_added
+                FROM main
+                WHERE isbn = ?
+                ORDER BY call_number_type
+                """,
+                (other_isbn,),
+            ).fetchall()
+            for row in moved_main_rows:
+                existing = conn.execute(
+                    """
+                    SELECT classification, source, date_added
+                    FROM main
+                    WHERE isbn = ? AND call_number_type = ?
+                    LIMIT 1
+                    """,
+                    (lowest_isbn, row["call_number_type"]),
+                ).fetchone()
+                merged_source = self._combine_sources(
+                    existing["source"] if existing else None,
+                    row["source"],
+                )
+                merged_classification = (
+                    existing["classification"]
+                    if existing and existing["classification"]
+                    else row["classification"]
+                )
+                merged_date = max(
+                    normalize_to_yyyymmdd(existing["date_added"]) if existing else None or 0,
+                    normalize_to_yyyymmdd(row["date_added"]) or 0,
+                ) or today_yyyymmdd()
+                conn.execute(
+                    """
+                    INSERT INTO main (isbn, call_number, call_number_type, classification, source, date_added)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(isbn, call_number_type) DO UPDATE SET
+                        classification = excluded.classification,
+                        source = excluded.source,
+                        date_added = excluded.date_added
+                    """,
+                    (
+                        lowest_isbn,
+                        row["call_number"],
+                        row["call_number_type"],
+                        merged_classification,
+                        merged_source,
+                        merged_date,
+                    ),
+                )
+            conn.execute("DELETE FROM main WHERE isbn = ?", (other_isbn,))
+
+            conn.execute(
+                """
+                INSERT INTO attempted (isbn, last_target, attempt_type, last_attempted, fail_count, last_error)
+                SELECT ?, last_target, attempt_type, last_attempted, fail_count, last_error
+                FROM attempted
+                WHERE isbn = ?
+                ON CONFLICT(isbn, last_target, attempt_type) DO UPDATE SET
+                    last_attempted = CASE
+                        WHEN excluded.last_attempted > attempted.last_attempted
+                        THEN excluded.last_attempted
+                        ELSE attempted.last_attempted
+                    END,
+                    fail_count = attempted.fail_count + excluded.fail_count,
+                    last_error = CASE
+                        WHEN excluded.last_attempted >= attempted.last_attempted
+                        THEN excluded.last_error
+                        ELSE attempted.last_error
+                    END
+                """,
+                (lowest_isbn, other_isbn),
+            )
+            conn.execute("DELETE FROM attempted WHERE isbn = ?", (other_isbn,))
+
+            conn.execute("DELETE FROM linked_isbns WHERE other_isbn = ?", (lowest_isbn,))
+            conn.execute("DELETE FROM linked_isbns WHERE lowest_isbn = ? AND other_isbn = ?", (other_isbn, lowest_isbn))
+            conn.execute(
+                """
+                UPDATE linked_isbns
+                SET lowest_isbn = ?
+                WHERE lowest_isbn = ?
+                  AND other_isbn <> ?
+                """,
+                (lowest_isbn, other_isbn, lowest_isbn),
+            )
+            self._upsert_linked_isbn_conn(conn, lowest_isbn=lowest_isbn, other_isbn=other_isbn)
 
     # -------------------------
     # ATTEMPTED TABLE HELPERS
@@ -667,6 +1076,34 @@ class DatabaseManager:
             placeholders = ",".join("?" for _ in chunk)
             conn.execute(f"DELETE FROM attempted WHERE isbn IN ({placeholders})", tuple(chunk))
 
+    def clear_attempted_for(self, isbn: str, attempt_type: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "DELETE FROM attempted WHERE isbn = ? AND attempt_type = ?",
+                (isbn, attempt_type),
+            )
+
+    def clear_attempted_pairs_many(
+        self,
+        conn: sqlite3.Connection,
+        pairs: Iterable[tuple[str, str]],
+    ) -> None:
+        pairs_list = [(isbn, attempt_type) for isbn, attempt_type in pairs if isbn and attempt_type]
+        if not pairs_list:
+            return
+
+        CHUNK = 400
+        for i in range(0, len(pairs_list), CHUNK):
+            chunk = pairs_list[i : i + CHUNK]
+            placeholders = ",".join("(?, ?)" for _ in chunk)
+            params: list[str] = []
+            for isbn, attempt_type in chunk:
+                params.extend([isbn, attempt_type])
+            conn.execute(
+                f"DELETE FROM attempted WHERE (isbn, attempt_type) IN ({placeholders})",
+                tuple(params),
+            )
+
     @staticmethod
     def _combine_sources(*values: Optional[str]) -> Optional[str]:
         parts: list[str] = []
@@ -686,9 +1123,18 @@ class DatabaseManager:
         with self.connect() as conn:
             return conn.execute(
                 """
-                SELECT isbn, lccn, lccn_source, nlmcn, nlmcn_source, classification, source, date_added
+                SELECT
+                    isbn,
+                    MAX(CASE WHEN call_number_type = 'lccn' THEN call_number END) AS lccn,
+                    MAX(CASE WHEN call_number_type = 'lccn' THEN source END) AS lccn_source,
+                    MAX(CASE WHEN call_number_type = 'nlmcn' THEN call_number END) AS nlmcn,
+                    MAX(CASE WHEN call_number_type = 'nlmcn' THEN source END) AS nlmcn_source,
+                    MAX(CASE WHEN call_number_type = 'lccn' THEN classification END) AS classification,
+                    group_concat(DISTINCT source) AS source,
+                    MAX(date_added) AS date_added
                 FROM main
-                ORDER BY date_added DESC
+                GROUP BY isbn
+                ORDER BY MAX(date_added) DESC, isbn
                 LIMIT ?
                 """,
                 (limit,),
@@ -725,10 +1171,10 @@ class DatabaseManager:
     def get_global_stats(self) -> dict:
         """Return aggregate stats used by dashboard cards."""
         with self.connect() as conn:
-            found = conn.execute("SELECT COUNT(*) FROM main").fetchone()[0]
-            failed = conn.execute("SELECT COUNT(*) FROM attempted").fetchone()[0]
+            found = conn.execute("SELECT COUNT(DISTINCT isbn) FROM main").fetchone()[0]
+            failed = conn.execute("SELECT COUNT(DISTINCT isbn) FROM attempted").fetchone()[0]
             invalid = conn.execute(
-                "SELECT COUNT(*) FROM attempted WHERE lower(coalesce(last_error, '')) LIKE '%invalid isbn%'"
+                "SELECT COUNT(DISTINCT isbn) FROM attempted WHERE lower(coalesce(last_error, '')) LIKE '%invalid isbn%'"
             ).fetchone()[0]
         return {
             "processed": int(found) + int(failed),
@@ -748,15 +1194,19 @@ class DatabaseManager:
                         isbn,
                         'Found' AS status,
                         trim(
-                            coalesce(lccn, '') ||
+                            coalesce(MAX(CASE WHEN call_number_type = 'lccn' THEN call_number END), '') ||
                             CASE
-                                WHEN lccn IS NOT NULL AND nlmcn IS NOT NULL THEN ' | '
+                                WHEN
+                                    MAX(CASE WHEN call_number_type = 'lccn' THEN call_number END) IS NOT NULL
+                                    AND MAX(CASE WHEN call_number_type = 'nlmcn' THEN call_number END) IS NOT NULL
+                                THEN ' | '
                                 ELSE ''
                             END ||
-                            coalesce(nlmcn, '')
+                            coalesce(MAX(CASE WHEN call_number_type = 'nlmcn' THEN call_number END), '')
                         ) AS detail,
-                        date_added AS time
+                        MAX(date_added) AS time
                     FROM main
+                    GROUP BY isbn
                     UNION ALL
                     SELECT
                         isbn,

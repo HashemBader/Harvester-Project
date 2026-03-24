@@ -2,6 +2,7 @@
 Module: test_db.py
 Part of the LCCN Harvester Project.
 """
+import sqlite3
 from pathlib import Path
 
 from src.database.db_manager import DatabaseManager, MainRecord
@@ -22,6 +23,40 @@ def test_db_init_and_main_roundtrip(tmp_path: Path):
     # classification should be auto-derived from lccn
     assert got.classification == "QA"
     assert got.source == "LoC"
+
+
+def test_main_stores_one_row_per_call_number_type(tmp_path: Path):
+    import sqlite3 as _sqlite3
+
+    db_path = tmp_path / "test.sqlite3"
+    db = DatabaseManager(db_path)
+    db.init_db()
+
+    db.upsert_main(
+        MainRecord(
+            isbn="9780132350884",
+            lccn="QA76.76",
+            lccn_source="LoC",
+            nlmcn="W1 100",
+            nlmcn_source="NLM",
+        )
+    )
+
+    with _sqlite3.connect(str(db_path)) as conn:
+        rows = conn.execute(
+            """
+            SELECT isbn, call_number, call_number_type, source
+            FROM main
+            WHERE isbn = ?
+            ORDER BY call_number_type
+            """,
+            ("9780132350884",),
+        ).fetchall()
+
+    assert rows == [
+        ("9780132350884", "QA76.76", "lccn", "LoC"),
+        ("9780132350884", "W1 100", "nlmcn", "NLM"),
+    ]
 
 
 def test_attempted_upsert_increments_fail_count(tmp_path: Path):
@@ -111,3 +146,183 @@ def test_should_skip_retry(tmp_path: Path):
     # Different target/type should not be skipped by that record.
     assert db.should_skip_retry("1111111111", "OtherTarget", "both", retry_days=7) is False
     assert db.should_skip_retry("1111111111", "Test", "lccn", retry_days=7) is False
+
+
+def test_init_db_recovers_from_legacy_main_table_before_index_creation(tmp_path: Path):
+    db_path = tmp_path / "legacy.sqlite3"
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE main (
+                isbn TEXT PRIMARY KEY,
+                lccn TEXT,
+                lccn_source TEXT,
+                nlmcn TEXT,
+                nlmcn_source TEXT,
+                classification TEXT,
+                date_added TEXT
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO main (isbn, lccn, lccn_source, nlmcn, nlmcn_source, classification, date_added)
+            VALUES ('9780132350884', 'QA76.76', 'LoC', 'W1 100', 'NLM', 'QA', '2026-03-23')
+            """
+        )
+
+    db = DatabaseManager(db_path)
+    db.init_db()
+
+    got = db.get_main("9780132350884")
+    assert got is not None
+    assert got.lccn == "QA76.76"
+    assert got.lccn_source == "LoC"
+    assert got.nlmcn == "W1 100"
+    assert got.nlmcn_source == "NLM"
+
+    with sqlite3.connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT call_number_type, call_number, source, typeof(date_added)
+            FROM main
+            WHERE isbn = ?
+            ORDER BY call_number_type
+            """,
+            ("9780132350884",),
+        ).fetchall()
+
+    assert rows == [
+        ("lccn", "QA76.76", "LoC", "integer"),
+        ("nlmcn", "W1 100", "NLM", "integer"),
+    ]
+
+
+def test_linked_isbn_helpers_insert_query_and_update(tmp_path: Path):
+    db_path = tmp_path / "test.sqlite3"
+    db = DatabaseManager(db_path)
+    db.init_db()
+
+    with sqlite3.connect(db_path) as conn:
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(linked_isbns)").fetchall()]
+        index_names = {row[1] for row in conn.execute("PRAGMA index_list(linked_isbns)").fetchall()}
+
+    assert columns == ["lowest_isbn", "other_isbn"]
+    assert "idx_linked_lowest" in index_names
+    assert "idx_linked_other" in index_names
+
+    db.upsert_linked_isbn(lowest_isbn="9780000000001", other_isbn="9780000000002")
+
+    assert db.get_lowest_isbn("9780000000002") == "9780000000001"
+    assert db.get_linked_isbns("9780000000001") == ["9780000000002"]
+
+    db.upsert_linked_isbn(lowest_isbn="9780000000000", other_isbn="9780000000002")
+
+    assert db.get_lowest_isbn("9780000000002") == "9780000000000"
+    assert db.get_linked_isbns("9780000000001") == []
+    assert db.get_linked_isbns("9780000000000") == ["9780000000002"]
+
+
+def test_init_db_migrates_legacy_linked_isbn_schema(tmp_path: Path):
+    db_path = tmp_path / "legacy_linked.sqlite3"
+
+    with sqlite3.connect(db_path) as conn:
+        conn.execute(
+            """
+            CREATE TABLE linked_isbns (
+                isbn TEXT PRIMARY KEY,
+                canonical_isbn TEXT NOT NULL
+            )
+            """
+        )
+        conn.executemany(
+            "INSERT INTO linked_isbns (isbn, canonical_isbn) VALUES (?, ?)",
+            [
+                ("9780000000001", "9780000000001"),
+                ("9780000000002", "9780000000001"),
+                ("9780000000003", "9780000000001"),
+            ],
+        )
+
+    db = DatabaseManager(db_path)
+    db.init_db()
+
+    with sqlite3.connect(db_path) as conn:
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(linked_isbns)").fetchall()]
+        rows = conn.execute(
+            "SELECT lowest_isbn, other_isbn FROM linked_isbns ORDER BY other_isbn"
+        ).fetchall()
+
+    assert columns == ["lowest_isbn", "other_isbn"]
+    assert rows == [
+        ("9780000000001", "9780000000002"),
+        ("9780000000001", "9780000000003"),
+    ]
+
+
+def test_rewrite_to_lowest_isbn_moves_main_attempted_and_linked_rows(tmp_path: Path):
+    db_path = tmp_path / "rewrite.sqlite3"
+    db = DatabaseManager(db_path)
+    db.init_db()
+
+    lowest_isbn = "9780000000001"
+    other_isbn = "9780000000002"
+
+    db.upsert_main(
+        MainRecord(
+            isbn=lowest_isbn,
+            nlmcn="W1 100",
+            nlmcn_source="NLM",
+            date_added=20260320,
+        )
+    )
+    db.upsert_main(
+        MainRecord(
+            isbn=other_isbn,
+            lccn="QA76.76",
+            lccn_source="LoC",
+            date_added=20260321,
+        )
+    )
+
+    db.upsert_attempted(
+        isbn=lowest_isbn,
+        last_target="Harvard",
+        attempt_type="both",
+        last_error="Earlier failure",
+        attempted_time=20260320,
+    )
+    db.upsert_attempted(
+        isbn=other_isbn,
+        last_target="Harvard",
+        attempt_type="both",
+        last_error="Later failure",
+        attempted_time=20260321,
+    )
+    db.upsert_attempted(
+        isbn=other_isbn,
+        last_target="Harvard",
+        attempt_type="both",
+        last_error="Latest failure",
+        attempted_time=20260322,
+    )
+
+    db.rewrite_to_lowest_isbn(lowest_isbn=lowest_isbn, other_isbn=other_isbn)
+
+    moved = db.get_main(lowest_isbn)
+    assert moved is not None
+    assert moved.isbn == lowest_isbn
+    assert moved.lccn == "QA76.76"
+    assert moved.nlmcn == "W1 100"
+    assert db.get_main(other_isbn) is None
+
+    attempted = db.get_attempted_for(lowest_isbn, "Harvard", "both")
+    assert attempted is not None
+    assert attempted.fail_count == 3
+    assert attempted.last_attempted == 20260322
+    assert attempted.last_error == "Latest failure"
+    assert db.get_attempted_for(other_isbn, "Harvard", "both") is None
+
+    assert db.get_lowest_isbn(other_isbn) == lowest_isbn
+    assert db.get_linked_isbns(lowest_isbn) == [other_isbn]

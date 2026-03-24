@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
-from src.database.db_manager import DatabaseManager, MainRecord, AttemptedRecord
+from src.database.db_manager import DatabaseManager, MainRecord, AttemptedRecord, yyyymmdd_to_iso_date
 
 
 class ExportManager:
@@ -102,7 +102,10 @@ class ExportManager:
         main_field_map = {
             "ISBN": "isbn",
             "LCCN": "lccn",
+            "LCCN Source": "lccn_source",
             "NLMCN": "nlmcn",
+            "NLM": "nlmcn",
+            "NLM Source": "nlmcn_source",
             "Classification": "classification",
             "Source": "source",
             "Date Added": "date_added"
@@ -129,12 +132,15 @@ class ExportManager:
                 if not headers:
                     headers = list(main_field_map.keys())
 
-                fields = [main_field_map[h] for h in headers]
-                query = f"SELECT {', '.join(fields)} FROM main ORDER BY isbn"
-                cursor = conn.execute(query)
-                rows = cursor.fetchall()
-                
-                data = [list(row) for row in rows]
+                rows = self.db.get_all_results(limit=100000)
+                rows = sorted(rows, key=lambda row: str(row["isbn"]))
+                data = [
+                    [
+                        self._format_export_value(main_field_map[h], row[main_field_map[h]] if main_field_map[h] in row.keys() else None)
+                        for h in headers
+                    ]
+                    for row in rows
+                ]
                 return data, headers
 
             elif source == "attempted":
@@ -148,7 +154,10 @@ class ExportManager:
                 cursor = conn.execute(query)
                 rows = cursor.fetchall()
                 
-                data = [list(row) for row in rows]
+                data = [
+                    [self._format_export_value(field, value) for field, value in zip(fields, row)]
+                    for row in rows
+                ]
                 return data, headers
             
             else:
@@ -176,3 +185,9 @@ class ExportManager:
 
         with path.open("w", encoding="utf-8") as f:
             json.dump(objects, f, ensure_ascii=False, indent=2)
+
+    @staticmethod
+    def _format_export_value(field_name: str, value: Any) -> Any:
+        if field_name in {"date_added", "last_attempted"}:
+            return yyyymmdd_to_iso_date(value)
+        return value

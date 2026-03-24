@@ -2,6 +2,7 @@
 __pycache__/
 *.py[codz]
 *$py.class
+.DS_Store
 
 # C extensions
 *.so
@@ -210,3 +211,6 @@ __marimo__/
 *.db
 *.sqlite
 *.sqlite3
+
+# Local app outputs
+data/exports/

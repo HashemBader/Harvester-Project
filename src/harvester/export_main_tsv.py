@@ -42,8 +42,15 @@ def export_main_to_tsv(db_path: Union[str, Path], out_path: Union[str, Path]) ->
 
         cursor.execute(
             """
-            SELECT isbn, lccn, nlmcn, classification, source, date_added
+            SELECT
+                isbn,
+                MAX(CASE WHEN call_number_type = 'lccn' THEN call_number END) AS lccn,
+                MAX(CASE WHEN call_number_type = 'nlmcn' THEN call_number END) AS nlmcn,
+                MAX(CASE WHEN call_number_type = 'lccn' THEN classification END) AS classification,
+                group_concat(DISTINCT source) AS source,
+                MAX(date_added) AS date_added
             FROM main
+            GROUP BY isbn
             ORDER BY isbn
             """
         )
