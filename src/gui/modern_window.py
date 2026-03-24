@@ -14,7 +14,6 @@ import sys
 from .targets_config_tab import TargetsConfigTab
 from .harvest_tab_v2 import HarvestTabV2
 from .dashboard_v2 import DashboardTabV2
-from .ai_assistant_tab import AIAssistantTab
 from .help_tab import HelpTab
 
 # Dialogs & Utils
@@ -24,7 +23,7 @@ from .styles_v2 import V2_STYLESHEET, generate_stylesheet, CATPPUCCIN_DARK, CATP
 from .icons import (
     get_icon, get_pixmap, 
     SVG_DASHBOARD, SVG_TARGETS, SVG_SETTINGS, SVG_RESULTS,
-    SVG_HARVEST, SVG_AI, SVG_CHEVRON_LEFT, SVG_CHEVRON_RIGHT,
+    SVG_HARVEST, SVG_CHEVRON_LEFT, SVG_CHEVRON_RIGHT,
     SVG_TOGGLE_ON, SVG_TOGGLE_OFF
 )
 from config.profile_manager import ProfileManager
@@ -135,13 +134,11 @@ class ModernMainWindow(QMainWindow):
         self.btn_dashboard = self._create_nav_btn("Dashboard", SVG_DASHBOARD, 0)
         self.btn_configure = self._create_nav_btn("Configure", SVG_TARGETS, 1)
         self.btn_harvest = self._create_nav_btn("Harvest", SVG_HARVEST, 2)
-        self.btn_ai = self._create_nav_btn("AI Agent", SVG_AI, 3)
-        self.btn_help = self._create_nav_btn("Help", SVG_RESULTS, 4)
+        self.btn_help = self._create_nav_btn("Help", SVG_RESULTS, 3)
 
         sidebar_layout.addWidget(self.btn_dashboard)
         sidebar_layout.addWidget(self.btn_configure)
         sidebar_layout.addWidget(self.btn_harvest)
-        sidebar_layout.addWidget(self.btn_ai)
         sidebar_layout.addWidget(self.btn_help)
 
         sidebar_layout.addStretch() # Spacer
@@ -190,14 +187,12 @@ class ModernMainWindow(QMainWindow):
         self.targets_tab = self.targets_config_tab.targets_tab
         self.config_tab = self.targets_config_tab.config_tab
         self.harvest_tab = HarvestTabV2()
-        self.ai_assistant_tab = AIAssistantTab()
         self.help_tab = HelpTab(shortcut_modifier=self._shortcut_modifier)
 
         self.stack.addWidget(self.dashboard_tab)         # 0
         self.stack.addWidget(self.targets_config_tab)    # 1
         self.stack.addWidget(self.harvest_tab)           # 2
-        self.stack.addWidget(self.ai_assistant_tab)      # 3
-        self.stack.addWidget(self.help_tab)              # 4
+        self.stack.addWidget(self.help_tab)              # 3
 
         content_layout.addWidget(self.stack)
 
@@ -267,8 +262,7 @@ class ModernMainWindow(QMainWindow):
         add_mod_shortcut("1", lambda: self.btn_dashboard.click())
         add_mod_shortcut("2", lambda: self.btn_configure.click())
         add_mod_shortcut("3", lambda: self.btn_harvest.click())
-        add_mod_shortcut("4", lambda: self.btn_ai.click())
-        add_mod_shortcut("5", lambda: self.btn_help.click())
+        add_mod_shortcut("4", lambda: self.btn_help.click())
 
         add_mod_shortcut("Shift+D", lambda: self.btn_dashboard.click())
         add_mod_shortcut("Shift+H", lambda: self.btn_harvest.click())
@@ -510,11 +504,8 @@ class ModernMainWindow(QMainWindow):
     # --- Logic ---
 
     def _apply_advanced_mode(self):
-        # AI Button now always visible, so we don't toggle it here
-        # self.btn_ai.setVisible(self.advanced_mode) <--- REMOVED
-        
         for tab in [self.dashboard_tab, self.targets_config_tab,
-                   self.harvest_tab, self.ai_assistant_tab]:
+                   self.harvest_tab]:
             if hasattr(tab, 'set_advanced_mode'):
                 tab.set_advanced_mode(self.advanced_mode)
 
