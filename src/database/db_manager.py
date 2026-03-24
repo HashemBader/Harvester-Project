@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import sys
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -106,6 +107,51 @@ class DatabaseManager:
     def __init__(self, db_path: Path | str = "data/lccn_harvester.sqlite3"):
         self.db_path = Path(db_path)
 
+    @staticmethod
+    def _default_schema_path() -> Path:
+        """Resolve the bundled schema path in both source and frozen runs."""
+        module_path = Path(__file__).resolve()
+        candidates: list[Path] = [module_path.with_name("schema.sql")]
+
+        # PyInstaller can place imported modules under either
+        # ``.../Frameworks/database`` or ``.../Frameworks/src/database`` on macOS.
+        # Walk a couple of ancestor layouts so the frozen app can still find the
+        # bundled schema even if ``__file__`` shifts between those structures.
+        for parent_index in (1, 2, 3):
+            try:
+                candidates.append(module_path.parents[parent_index] / "database" / "schema.sql")
+            except IndexError:
+                break
+
+        if getattr(sys, "frozen", False):
+            try:
+                from config.app_paths import get_bundle_root
+                bundle_root = get_bundle_root()
+                candidates.extend(
+                    [
+                        bundle_root / "database" / "schema.sql",
+                        bundle_root / "src" / "database" / "schema.sql",
+                    ]
+                )
+            except Exception:
+                pass
+
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                root = Path(meipass)
+                candidates.extend(
+                    [
+                        root / "database" / "schema.sql",
+                        root / "src" / "database" / "schema.sql",
+                    ]
+                )
+
+        for path in candidates:
+            if path.exists():
+                return path
+
+        return candidates[0]
+
     @contextmanager
     def connect(self):
         """
@@ -171,7 +217,7 @@ class DatabaseManager:
         If the database file is corrupt, it is automatically deleted and recreated.
         """
         if schema_path is None:
-            schema_path = Path(__file__).with_name("schema.sql")
+            schema_path = self._default_schema_path()
 
         # Auto-repair: if the existing file is malformed, wipe and start fresh
         if not self._is_db_healthy():

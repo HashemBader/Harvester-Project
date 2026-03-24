@@ -45,12 +45,33 @@ def get_bundle_root() -> Path:
     return Path(__file__).resolve().parent.parent.parent
 
 
+def _find_local_workspace_root() -> Path | None:
+    """Detect a developer-local frozen build inside the project workspace.
+
+    When the packaged app is launched from ``<project>/dist/...``, we want it to
+    behave exactly like ``src/gui_launcher.py`` and reuse the project's live
+    ``config/`` and ``data/`` files instead of a separate app-support folder.
+    """
+    if not _IS_FROZEN:
+        return None
+
+    executable = Path(sys.executable).resolve()
+    for candidate in executable.parents:
+        if (candidate / "src" / "gui_launcher.py").exists():
+            return candidate
+    return None
+
+
 def get_user_data_dir() -> Path:
     """Return a *writable* directory for user data (config, output, settings).
 
     The directory is created if it does not exist.
     """
     if _IS_FROZEN:
+        workspace_root = _find_local_workspace_root()
+        if workspace_root is not None:
+            return workspace_root
+
         system = platform.system()
         if system == "Darwin":
             base = Path.home() / "Library" / "Application Support" / "LCCN Harvester"
@@ -104,6 +125,12 @@ def ensure_user_data_setup() -> None:
     User-created outputs such as databases and exports are left alone.
     """
     if not _IS_FROZEN:
+        return
+
+    # A bundle launched directly from this repository's ``dist/`` folder should
+    # share the same writable files as ``gui_launcher.py`` for exact parity
+    # during local testing and review.
+    if _find_local_workspace_root() is not None:
         return
 
     bundle_root = get_bundle_root()

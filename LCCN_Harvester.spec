@@ -56,6 +56,7 @@ datas = [
     (str(ICONS_DIR),                    "gui/icons"),
     # Database SQL schema (db_manager.py reads it at runtime)
     (str(DB_DIR / "schema.sql"),        "database"),
+    (str(DB_DIR / "schema.sql"),        "src/database"),
     # Docs (help tab reads WCAG docs from here)
     (str(DOCS_DIR),                     "docs"),
     # The full src tree so that __file__-relative lookups work
