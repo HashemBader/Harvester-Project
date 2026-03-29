@@ -29,6 +29,7 @@ class TargetResult:
     lccn: Optional[str] = None
     nlmcn: Optional[str] = None
     source: Optional[str] = None
+    isbns: tuple[str, ...] = ()
     error: Optional[str] = None
 
 
