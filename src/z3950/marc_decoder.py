@@ -41,7 +41,7 @@ def pymarc_record_to_json(record: Any) -> Dict[str, List[Dict[str, Any]]]:
 
     Notes
     -----
-    - Only extracts MARC fields 050 (LCCN) and 060 (NLMCN)
+    - Extracts MARC fields 020 (ISBN), 050 (LCCN), and 060 (NLMCN)
     - Handles repeating fields and subfields
     - Preserves subfield order and values
     """

@@ -1,7 +1,7 @@
 """
 Module: database_browser_dialog.py
-Full database browser — shows all rows across main, attempted, linked_isbns,
-and subjects tables with live search and pagination.
+Full database browser — shows all rows across main, attempted, and linked_isbns
+tables with live search and pagination.
 """
 import sqlite3
 
@@ -19,7 +19,6 @@ TABLE_COLUMNS = {
     "main":         ["isbn", "call_number", "call_number_type", "classification", "source", "date_added"],
     "attempted":    ["isbn", "last_target", "attempt_type", "last_attempted", "fail_count", "last_error"],
     "linked_isbns": ["lowest_isbn", "other_isbn"],
-    "subjects":     ["id", "isbn", "field", "indicator2", "subject", "source", "date_added"],
 }
 
 # Index of the column used for source filtering (None = no source filter for that table)
@@ -27,7 +26,6 @@ SOURCE_COL_INDEX = {
     "main":         4,   # source
     "attempted":    1,   # last_target
     "linked_isbns": None,
-    "subjects":     5,   # source
 }
 
 PAGE_SIZE = 200

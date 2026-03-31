@@ -50,19 +50,3 @@ CREATE TABLE IF NOT EXISTS linked_isbns (
 CREATE INDEX IF NOT EXISTS idx_linked_lowest ON linked_isbns(lowest_isbn);
 CREATE INDEX IF NOT EXISTS idx_linked_other ON linked_isbns(other_isbn);
 
--- =========================
--- Stretch: Subjects harvested from MARC 6XX fields
--- =========================
-CREATE TABLE IF NOT EXISTS subjects (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    isbn        TEXT NOT NULL,
-    field       TEXT,         -- e.g., 650
-    indicator2  TEXT,         -- thesaurus indicator (2nd indicator)
-    subject     TEXT NOT NULL,
-    source      TEXT,
-    date_added  INTEGER NOT NULL,  -- yyyymmdd (e.g. 20260317)
-    FOREIGN KEY (isbn) REFERENCES main(isbn) ON DELETE CASCADE
-);
-
-CREATE INDEX IF NOT EXISTS idx_subjects_isbn ON subjects(isbn);
-CREATE INDEX IF NOT EXISTS idx_subjects_field ON subjects(field);
