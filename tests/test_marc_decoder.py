@@ -124,11 +124,13 @@ def test_pymarc_record_to_json_falls_back_to_first_when_no_ind2_0():
 
 
 def test_pymarc_record_to_json_no_050_060():
-    """A record with no 050 or 060 fields returns an empty fields list."""
+    """A record with only a 020 field returns the 020 field; no 050/060 present."""
     r = Record()
     r.add_field(_field("020", " ", ("a", "0451524934")))  # ISBN only
     result = pymarc_record_to_json(r)
-    assert result == {"fields": []}
+    # 020 is now included (needed for extract_isbns_from_pymarc); 050/060 absent
+    assert len(result["fields"]) == 1
+    assert "020" in result["fields"][0]
 
 
 def test_pymarc_record_to_json_invalid_object():

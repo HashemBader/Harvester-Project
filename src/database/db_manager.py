@@ -453,8 +453,7 @@ class DatabaseManager:
     def _migrate_dates_to_yyyymmdd(self, conn: sqlite3.Connection) -> None:
         """
         One-off migration: convert any legacy ISO text dates stored in
-        main.date_added, attempted.last_attempted, and subjects.date_added
-        to yyyymmdd integers.
+        main.date_added and attempted.last_attempted to yyyymmdd integers.
 
         A row is considered a legacy ISO string when the stored value is TEXT
         (typeof) and contains a '-' character (e.g. '2025-06-01T12:00:00+00:00').
@@ -509,20 +508,6 @@ class DatabaseManager:
                     "Could not convert attempted.last_attempted=%r for isbn=%s",
                     row["last_attempted"], row["isbn"],
                 )
-
-        # -- subjects.date_added (stretch table, may not exist yet) --
-        try:
-            rows_subj = conn.execute(
-                "SELECT id, date_added FROM subjects WHERE typeof(date_added) = 'text'"
-            ).fetchall()
-            for row in rows_subj:
-                new_val = _iso_to_yyyymmdd(row["date_added"])
-                if new_val is not None:
-                    conn.execute("UPDATE subjects SET date_added = ? WHERE id = ?", (new_val, row["id"]))
-                else:
-                    log.warning("Could not convert subjects.date_added=%r for id=%s", row["date_added"], row["id"])
-        except Exception:
-            pass  # subjects table may not exist in all deployments
 
         if rows_main or rows_att:
             log.info(
@@ -782,110 +767,6 @@ class DatabaseManager:
             """,
             (lowest_isbn, other_isbn),
         )
-
-    def rewrite_to_lowest_isbn(self, *, lowest_isbn: str, other_isbn: str) -> None:
-        """Move main/attempted rows from *other_isbn* to *lowest_isbn* and record the link."""
-        lowest_isbn = (lowest_isbn or "").strip()
-        other_isbn = (other_isbn or "").strip()
-        if not lowest_isbn or not other_isbn:
-            raise ValueError("lowest_isbn and other_isbn are required")
-        if lowest_isbn == other_isbn:
-            return
-
-        with self.connect() as conn:
-            # ``subjects`` still uses a legacy FK against ``main(isbn)`` while
-            # ``main`` now has a composite primary key. Temporarily disabling FK
-            # enforcement for this connection avoids a false mismatch during the
-            # row rewrite; the connection is short-lived and closes immediately
-            # after the rewrite completes.
-            conn.execute("PRAGMA foreign_keys = OFF;")
-            moved_main_rows = conn.execute(
-                """
-                SELECT call_number, call_number_type, classification, source, date_added
-                FROM main
-                WHERE isbn = ?
-                ORDER BY call_number_type
-                """,
-                (other_isbn,),
-            ).fetchall()
-            for row in moved_main_rows:
-                existing = conn.execute(
-                    """
-                    SELECT classification, source, date_added
-                    FROM main
-                    WHERE isbn = ? AND call_number_type = ?
-                    LIMIT 1
-                    """,
-                    (lowest_isbn, row["call_number_type"]),
-                ).fetchone()
-                merged_source = self._combine_sources(
-                    existing["source"] if existing else None,
-                    row["source"],
-                )
-                merged_classification = (
-                    existing["classification"]
-                    if existing and existing["classification"]
-                    else row["classification"]
-                )
-                merged_date = max(
-                    normalize_to_yyyymmdd(existing["date_added"]) if existing else None or 0,
-                    normalize_to_yyyymmdd(row["date_added"]) or 0,
-                ) or today_yyyymmdd()
-                conn.execute(
-                    """
-                    INSERT INTO main (isbn, call_number, call_number_type, classification, source, date_added)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(isbn, call_number_type) DO UPDATE SET
-                        classification = excluded.classification,
-                        source = excluded.source,
-                        date_added = excluded.date_added
-                    """,
-                    (
-                        lowest_isbn,
-                        row["call_number"],
-                        row["call_number_type"],
-                        merged_classification,
-                        merged_source,
-                        merged_date,
-                    ),
-                )
-            conn.execute("DELETE FROM main WHERE isbn = ?", (other_isbn,))
-
-            conn.execute(
-                """
-                INSERT INTO attempted (isbn, last_target, attempt_type, last_attempted, fail_count, last_error)
-                SELECT ?, last_target, attempt_type, last_attempted, fail_count, last_error
-                FROM attempted
-                WHERE isbn = ?
-                ON CONFLICT(isbn, last_target, attempt_type) DO UPDATE SET
-                    last_attempted = CASE
-                        WHEN excluded.last_attempted > attempted.last_attempted
-                        THEN excluded.last_attempted
-                        ELSE attempted.last_attempted
-                    END,
-                    fail_count = attempted.fail_count + excluded.fail_count,
-                    last_error = CASE
-                        WHEN excluded.last_attempted >= attempted.last_attempted
-                        THEN excluded.last_error
-                        ELSE attempted.last_error
-                    END
-                """,
-                (lowest_isbn, other_isbn),
-            )
-            conn.execute("DELETE FROM attempted WHERE isbn = ?", (other_isbn,))
-
-            conn.execute("DELETE FROM linked_isbns WHERE other_isbn = ?", (lowest_isbn,))
-            conn.execute("DELETE FROM linked_isbns WHERE lowest_isbn = ? AND other_isbn = ?", (other_isbn, lowest_isbn))
-            conn.execute(
-                """
-                UPDATE linked_isbns
-                SET lowest_isbn = ?
-                WHERE lowest_isbn = ?
-                  AND other_isbn <> ?
-                """,
-                (lowest_isbn, other_isbn, lowest_isbn),
-            )
-            self._upsert_linked_isbn_conn(conn, lowest_isbn=lowest_isbn, other_isbn=other_isbn)
 
     # -------------------------
     # ATTEMPTED TABLE HELPERS
