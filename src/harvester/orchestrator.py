@@ -348,7 +348,7 @@ class HarvestOrchestrator:
         attempted_rows: list[tuple[str, Optional[str], str, Optional[int], Optional[str]]] = []
 
         if isbn not in self.bypass_cache_isbns:
-            cached_rec = self.db.get_main(isbn, allowed_sources=self._allowed_cached_sources())
+            cached_rec = self.db.get_main(store_isbn, allowed_sources=self._allowed_cached_sources())
         if cached_rec is not None:
             found_lccn = cached_rec.lccn
             found_lccn_source = getattr(cached_rec, "lccn_source", None) or cached_rec.source
@@ -954,14 +954,19 @@ class HarvestOrchestrator:
                 found_nlmcn: Optional[str] = None
                 found_nlmcn_source: Optional[str] = None
                 if isbn not in self.bypass_cache_isbns:
-                    cached_rec = self.db.get_main(isbn, allowed_sources=self._allowed_cached_sources())
+                    store_isbn_for_cache = self.db.get_lowest_isbn(isbn)
+                    cached_rec = self.db.get_main(store_isbn_for_cache, allowed_sources=self._allowed_cached_sources())
+                    is_linked_input = store_isbn_for_cache != isbn
+                else:
+                    is_linked_input = False
                 if cached_rec is not None:
                     found_lccn = cached_rec.lccn
                     found_lccn_source = getattr(cached_rec, "lccn_source", None) or cached_rec.source
                     found_nlmcn = cached_rec.nlmcn
                     found_nlmcn_source = getattr(cached_rec, "nlmcn_source", None) or cached_rec.source
                     if self._should_stop_with_found(bool(found_lccn), bool(found_nlmcn)):
-                        self._emit("cached", {
+                        event_name = "linked_cached" if is_linked_input else "cached"
+                        self._emit(event_name, {
                             "isbn": isbn,
                             "source": cached_rec.source,
                             "lccn": cached_rec.lccn,
