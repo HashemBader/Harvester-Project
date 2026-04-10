@@ -275,6 +275,12 @@ QFrame[class="Card"]:hover, QFrame.Card:hover {{
     border-bottom: 2px solid {t['primary']};
 }}
 
+/* Suppress hover highlight on static banner/header frames */
+QFrame#HarvestBanner:hover, QFrame#HelpHeader:hover {{
+    border: 1px solid {t['border']};
+    border-bottom: 2px solid {t['shadow']};
+}}
+
 /* Special Styling for Live Panel to make it a focal point */
 QFrame#LivePanel {{
     background-color: {t['surface']};

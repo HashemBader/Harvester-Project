@@ -94,6 +94,21 @@ class HelpTab(QWidget):
         text_color = colors.get("text", "#f9fafb")
         for lbl, fmt in self._text_labels:
             lbl.setStyleSheet(fmt.format(color=text_color))
+        if hasattr(self, "_help_header_frame"):
+            c = colors
+            self._help_header_frame.setStyleSheet(
+                f"QFrame#HelpHeader {{"
+                f"  background-color: {c.get('surface', '#1f2937')};"
+                f"  border: 1px solid {c.get('border', '#4b5563')};"
+                f"  border-bottom: 2px solid {c.get('shadow', '#030712')};"
+                f"  border-radius: 12px;"
+                f"}}"
+                f"QFrame#HelpHeader:hover {{"
+                f"  background-color: {c.get('surface', '#1f2937')};"
+                f"  border: 1px solid {c.get('border', '#4b5563')};"
+                f"  border-bottom: 2px solid {c.get('shadow', '#030712')};"
+                f"}}"
+            )
 
     # ──────────────────────────────────────────────────────────────────
     # Style helpers — each returns a self-contained inline stylesheet string
@@ -305,7 +320,21 @@ class HelpTab(QWidget):
             gives it a surface background and border.
         """
         frame = QFrame()
-        frame.setProperty("class", "Card")
+        frame.setObjectName("HelpHeader")
+        c = self._colors
+        frame.setStyleSheet(
+            f"QFrame#HelpHeader {{"
+            f"  background-color: {c.get('surface', '#1f2937')};"
+            f"  border: 1px solid {c.get('border', '#4b5563')};"
+            f"  border-bottom: 2px solid {c.get('shadow', '#030712')};"
+            f"  border-radius: 12px;"
+            f"}}"
+            f"QFrame#HelpHeader:hover {{"
+            f"  background-color: {c.get('surface', '#1f2937')};"
+            f"  border: 1px solid {c.get('border', '#4b5563')};"
+            f"  border-bottom: 2px solid {c.get('shadow', '#030712')};"
+            f"}}"
+        )
         lay = QHBoxLayout(frame)
         lay.setContentsMargins(22, 13, 22, 13)
         lay.setSpacing(10)
@@ -325,6 +354,7 @@ class HelpTab(QWidget):
 
         lay.addStretch()
 
+        self._help_header_frame = frame
         return frame
 
     # ──────────────────────────────────────────────────────────────────
@@ -549,11 +579,15 @@ class HelpTab(QWidget):
 
         lay.addSpacing(14)
 
-        platform_name = "macOS" if self.platform == "mac" else "Windows / Linux"
+        if sys.platform == "darwin":
+            platform_name = "macOS"
+        elif sys.platform == "win32":
+            platform_name = "Windows"
+        else:
+            platform_name = "Linux"
         about_rows = [
-            ("Version",      "1.0.0"),
-            ("Organisation", "UPEI Library"),
-            ("Platform",     platform_name),
+            ("Version",  "1.0.0"),
+            ("Platform", platform_name),
         ]
         for key, val in about_rows:
             info_row = QHBoxLayout()
