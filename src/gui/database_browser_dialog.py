@@ -208,7 +208,7 @@ class _TableTab(QWidget):
             self._all_rows = [tuple(r) for r in rows]
         except Exception as e:
             self._all_rows = []
-            self.lbl_info.setText(f"Error: {e}")
+            self.lbl_info.setText("Could not load data. The database may be unavailable or corrupted.")
 
         # Repopulate source/target filter dropdown after each load.
         if self.source_filter is not None and self._source_col is not None:

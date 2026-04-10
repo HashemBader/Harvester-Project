@@ -78,6 +78,29 @@ from src.config.profile_manager import ProfileManager
 from src.utils.isbn_validator import normalize_isbn
 from .theme_manager import ThemeManager
 
+
+def _friendly_error(exc: Exception) -> str:
+    """Convert a technical exception into a plain-language message for end users."""
+    msg = str(exc).lower()
+    if "database is locked" in msg:
+        return "The database is currently in use by another process. Please wait a moment and try again."
+    if "no such table" in msg or "no such column" in msg:
+        return "The database is missing required data. Try re-opening the application."
+    if "disk" in msg or "no space" in msg:
+        return "Your disk is full. Free up some space and try again."
+    if "permission" in msg or "access is denied" in msg:
+        return "Access denied. Check that you have permission to read/write the file or folder."
+    if "file not found" in msg or "no such file" in msg:
+        return "A required file could not be found. It may have been moved or deleted."
+    if "corrupt" in msg or "malformed" in msg:
+        return "The file appears to be corrupted. Try using a different file."
+    if "timeout" in msg or "timed out" in msg:
+        return "The operation timed out. Check your network connection and try again."
+    if "connect" in msg or "network" in msg or "socket" in msg:
+        return "Could not connect to the server. Check your internet connection."
+    return "An unexpected error occurred. Please try again or contact support."
+
+
 class UIState(Enum):
     """All possible states for the Harvest tab UI state machine.
 
@@ -961,7 +984,7 @@ class HarvestTab(QWidget):
             self._check_start_conditions(unique_valid)
 
         except Exception as e:
-            self._set_invalid_state(path_obj.name, f"Error reading file: {e}")
+            self._set_invalid_state(path_obj.name, _friendly_error(e))
 
     def _check_start_conditions(self, isbn_count=None):
         """Evaluate whether the Start button should be enabled.
@@ -1053,7 +1076,7 @@ class HarvestTab(QWidget):
             name = path_obj.name + (" (first 20 rows)" if truncated else "")
             self.lbl_preview_filename.setText(name)
         except Exception as e:
-            self._show_preview_message(f"Error reading preview: {e}")
+            self._show_preview_message("Could not load preview.")
 
     def _show_preview_message(self, msg: str):
         """Show a single-cell message in the preview table."""
@@ -1139,7 +1162,7 @@ class HarvestTab(QWidget):
             name = path_obj.name + (" (first 20 rows)" if truncated else "")
             self.lbl_preview_filename.setText(name)
         except Exception as e:
-            self._show_preview_message(f"Error reading preview: {e}")
+            self._show_preview_message("Could not load preview.")
 
     def _copy_preview_content(self):
         """Copy the preview table's data columns (excluding Status) to the clipboard as TSV."""
@@ -1238,7 +1261,7 @@ class HarvestTab(QWidget):
         self.lbl_val_duplicates.setText("-")
 
         self.preview_text.clear()
-        self.preview_text.setText(f"Error: {error_msg}")
+        self.preview_text.setText(error_msg)
 
         self.progress_bar.setFormat("0 / 0")
         self.log_output.setText(error_msg)
@@ -1774,15 +1797,18 @@ class HarvestTab(QWidget):
             self.progress_bar.setFormat("0/0 (0%)")
 
             if error_msg:
-                # Crash/exception — show a clear error dialog and keep the message
-                self.log_output.setText(f"Harvest failed: {error_msg}")
+                # Keep the full technical message in the log for debugging,
+                # but show a plain-language dialog to the user.
+                self.log_output.setText(f"Harvest stopped unexpectedly. See details below.\n\n{error_msg}")
                 self.log_output.setProperty("state", "error")
                 self.log_output.style().unpolish(self.log_output)
                 self.log_output.style().polish(self.log_output)
                 QMessageBox.critical(
                     self,
-                    "Harvest Error",
-                    f"The harvest encountered an error and could not complete:\n\n{error_msg}",
+                    "Harvest Stopped",
+                    "The harvest stopped unexpectedly and could not complete.\n\n"
+                    "This is usually caused by a database access issue or a problem writing output files. "
+                    "Check that the output folder exists and that you have write permission, then try again.",
                 )
             else:
                 self.log_output.setText("Ready...")
@@ -2002,7 +2028,7 @@ class HarvestTab(QWidget):
         try:
             records = self._parse_marc_records(path)
         except Exception as exc:
-            self._marc_status_label.setText(f"Error reading MARC file: {exc}")
+            self._marc_status_label.setText("Could not read the MARC file. Make sure it is a valid .mrc or .xml file.")
             self._btn_import_marc.setEnabled(True)
             return
 
@@ -2176,7 +2202,7 @@ class HarvestTab(QWidget):
         try:
             records = self._parse_marc_records(path)
         except Exception as exc:
-            self._marc_hint_label.setText(f"Error reading MARC file: {exc}")
+            self._marc_hint_label.setText("Could not read the MARC file. Make sure it is a valid .mrc or .xml file.")
             self._btn_import_marc.setEnabled(True)
             return
 
