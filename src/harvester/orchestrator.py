@@ -54,6 +54,41 @@ ProgressCallback = Callable[[str, dict], None]
 CancelCheck = Callable[[], bool]
 
 
+def _friendly_target_error(raw: str) -> str:
+    """Translate a raw technical error string into plain language for DB storage / UI display."""
+    e = (raw or "").strip().lower()
+    if not e:
+        return "Unknown error"
+    # Z39.50 connection problems
+    if "graceful close" in e:
+        return "Server unavailable (connection closed by remote server)"
+    if "timed out" in e or "timeout" in e:
+        return "Connection timed out"
+    if "connection refused" in e:
+        return "Connection refused by server"
+    if "connection reset" in e or "remote end closed" in e:
+        return "Connection lost"
+    if "name or service not known" in e or "temporary failure in name resolution" in e:
+        return "Server not found (DNS error)"
+    # Z39.50 authentication / access
+    if "access-control failure" in e or "bib1err: 101" in e:
+        return "Access denied (server requires credentials)"
+    if "bib1err" in e:
+        return "Server returned an error"
+    # General network
+    if "socket" in e:
+        return "Network error"
+    # Record-level issues — keep these as-is (already user-friendly)
+    if e.startswith("no records found"):
+        return raw.strip()
+    if "no lccn" in e or "no call number" in e or "no 050" in e or "no 060" in e:
+        return raw.strip()
+    if "record found but" in e:
+        return raw.strip()
+    # Fallback
+    return raw.strip()
+
+
 class HarvestTarget(Protocol):
     """A target data source the orchestrator can try (API, Z39.50, etc.)."""
 
@@ -649,14 +684,15 @@ class HarvestOrchestrator:
                 continue
 
             # failure from this target; continue
-            last_error = result.error or "Unknown error"
+            last_error = _friendly_target_error(result.error or "")
             err = (result.error or "").strip()
+            friendly_err = _friendly_target_error(err)
             if err.lower().startswith("no records found in"):
                 not_found_targets.append(last_target)
             elif err:
-                other_errors.append((last_target, err))
+                other_errors.append((last_target, friendly_err))
             for call_number_type in required_types:
-                reason = err or f"No {self._type_label(call_number_type)} call number"
+                reason = friendly_err or f"No {self._type_label(call_number_type)} call number"
                 attempted_rows.append((store_isbn, last_target, call_number_type, attempt_time, reason))
                 self._emit_attempt_failure(
                     isbn=isbn,
@@ -1173,14 +1209,15 @@ class HarvestOrchestrator:
                         # Not stopping yet — continue to next target for the missing counterpart.
                         continue
 
-                    last_error = result.error or "Unknown error"
+                    last_error = _friendly_target_error(result.error or "")
                     err = (result.error or "").strip()
+                    friendly_err = _friendly_target_error(err)
                     if err.lower().startswith("no records found in"):
                         not_found_targets.append(last_target)
                     elif err:
-                        other_errors.append((last_target, err))
+                        other_errors.append((last_target, friendly_err))
                     for call_number_type in required_types:
-                        reason = err or f"No {self._type_label(call_number_type)} call number"
+                        reason = friendly_err or f"No {self._type_label(call_number_type)} call number"
                         attempted_rows.append((isbn, last_target, call_number_type, attempt_time, reason))
                         self._emit_attempt_failure(
                             isbn=isbn,
