@@ -68,6 +68,7 @@ from .harvest_support import (
     _prepare_marc_import_records,
     _safe_filename,
     _write_csv_rows,
+    parse_isbn_file,
 )
 
 from src.harvester.marc_import import MarcImportService
