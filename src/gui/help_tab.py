@@ -14,7 +14,7 @@ import sys
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QFrame, QPushButton, QSizePolicy, QScrollArea, QStackedWidget, QTextBrowser,
+    QFrame, QPushButton, QSizePolicy, QStackedWidget, QTextBrowser,
 )
 
 from .accessibility_statement_dialog import load_accessibility_statement
@@ -122,11 +122,11 @@ class HelpTab(QWidget):
             f"border: 1px solid {c.get('border_strong', '#6b7280')};"
             f"border-bottom: 2px solid {c.get('shadow', '#030712')};"
             f"border-radius: 5px;"
-            f"padding: 3px 9px;"
+            f"padding: 4px 10px;"
             f"font-family: 'SF Mono','Consolas','Courier New',monospace;"
-            f"font-size: 11px;"
+            f"font-size: 12px;"
             f"font-weight: 700;"
-            f"letter-spacing: 0.3px;"
+            f"letter-spacing: 0;"
         )
 
     def _panel_style(self) -> str:
@@ -159,7 +159,7 @@ class HelpTab(QWidget):
     def _desc_style(self) -> str:
         """Body text for shortcut descriptions and accessibility items — full text colour."""
         return (
-            f"font-size: 12px;"
+            f"font-size: 13px;"
             f"color: {self._colors.get('text', '#f9fafb')};"
             f"background: transparent; border: none;"
         )
@@ -167,7 +167,7 @@ class HelpTab(QWidget):
     def _plus_style(self) -> str:
         """The '+' separator between key badges."""
         return (
-            f"font-size: 11px; font-weight: 700;"
+            f"font-size: 12px; font-weight: 700;"
             f"color: {self._colors.get('text_muted', '#9ca3af')};"
             f"padding: 0 2px; background: transparent; border: none;"
         )
@@ -186,7 +186,7 @@ class HelpTab(QWidget):
         # Compare against the dark palette's bg value to infer the current theme.
         section_color = "#ffffff" if self._colors.get("bg", "").lower() == CATPPUCCIN_DARK.get("bg", "").lower() else "#000000"
         return (
-            "font-size: 12px; font-weight: 800; letter-spacing: 1.3px;"
+            "font-size: 13px; font-weight: 800; letter-spacing: 0;"
             f"color: {section_color};"
         )
 
@@ -211,14 +211,9 @@ class HelpTab(QWidget):
         _outer.setContentsMargins(0, 0, 0, 0)
         _outer.setSpacing(0)
 
-        _scroll = QScrollArea()
-        _scroll.setWidgetResizable(True)
-        _scroll.setFrameShape(QFrame.Shape.NoFrame)
-        _scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
         _scr_content = QWidget()
         _scr_content.setMinimumWidth(620)
-        _scroll.setWidget(_scr_content)
-        _outer.addWidget(_scroll)
+        _outer.addWidget(_scr_content)
 
         root = QVBoxLayout(_scr_content)
         root.setContentsMargins(20, 20, 20, 20)
@@ -386,11 +381,11 @@ class HelpTab(QWidget):
         heading_row = QHBoxLayout()
         heading_row.setSpacing(9)
         h_icon = QLabel()
-        h_icon.setPixmap(get_pixmap(SVG_SETTINGS, "#3b82f6", 15))
-        h_icon.setFixedSize(17, 17)
+        h_icon.setPixmap(get_pixmap(SVG_SETTINGS, "#3b82f6", 18))
+        h_icon.setFixedSize(20, 20)
         heading_row.addWidget(h_icon)
         heading_lbl = QLabel("Keyboard Shortcuts")
-        self._set_text_label(heading_lbl, "font-size: 13px; font-weight: 800; color: {color};")
+        self._set_text_label(heading_lbl, "font-size: 16px; font-weight: 800; color: {color};")
         heading_row.addWidget(heading_lbl)
         heading_row.addStretch()
         lay.addLayout(heading_row)
@@ -400,7 +395,7 @@ class HelpTab(QWidget):
             # Section label + divider
             cat_row = QHBoxLayout()
             cat_row.setSpacing(10)
-            cat_row.setContentsMargins(0, 6, 0, 6)
+            cat_row.setContentsMargins(0, 6, 0, 5)
             cat_lbl = QLabel(category.upper())
             cat_lbl.setStyleSheet(self._section_title_style())
             self._section_labels.append(cat_lbl)
@@ -417,7 +412,7 @@ class HelpTab(QWidget):
                 lay.addWidget(self._build_shortcut_row(keys, description))
                 lay.addSpacing(5)
 
-            lay.addSpacing(6)
+            lay.addSpacing(5)
 
         lay.addStretch()
         return frame
@@ -439,6 +434,7 @@ class HelpTab(QWidget):
         """
         widget = QWidget()
         widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        widget.setMinimumHeight(32)
         row = QHBoxLayout(widget)
         row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(14)
@@ -471,7 +467,7 @@ class HelpTab(QWidget):
         badge_wrapper.setLayout(badge_box)
         # Fixed width ensures the description column starts at a consistent
         # horizontal position regardless of how many keys are in the shortcut.
-        badge_wrapper.setFixedWidth(165)
+        badge_wrapper.setFixedWidth(180)
         row.addWidget(badge_wrapper, 0, Qt.AlignmentFlag.AlignVCenter)
 
         desc = QLabel(description)

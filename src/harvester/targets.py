@@ -92,7 +92,7 @@ class Z3950Target:
                     return TargetResult(
                         success=False,
                         source=self.name,
-                        error=messages.NetworkMessages.no_match.format(target=self.name)
+                        error="No records found"
                     )
 
                 # Extract LCCN (MARC 050 $a+$b), NLMCN (MARC 060 $a+$b), and all ISBNs.
@@ -172,7 +172,7 @@ class LibraryOfCongressTarget:
                 return TargetResult(
                     success=False,
                     source=self.name,
-                    error=f"No records found in {self.name}.",
+                    error="No records found",
                     isbns=tuple(result.isbns),
                 )
             else:
@@ -221,7 +221,7 @@ class HarvardLibraryCloudTarget:
                 return TargetResult(
                     success=False,
                     source=self.name,
-                    error=f"No records found in {self.name}.",
+                    error="No records found",
                     isbns=tuple(result.isbns),
                 )
             else:
@@ -270,7 +270,7 @@ class OpenLibraryTarget:
                 return TargetResult(
                     success=False,
                     source=self.name,
-                    error=f"No records found in {self.name}.",
+                    error="No records found",
                     isbns=tuple(result.isbns),
                 )
             else:

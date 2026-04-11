@@ -895,8 +895,17 @@ class HarvestWorker(QThread):
         lowered = text.lower()
         if not text:
             return None
-        # "Not found" is a normal negative result, not a target infrastructure problem.
-        if "no records found in" in lowered or "not found" in lowered:
+        # These are normal negative catalogue results, not target infrastructure problems.
+        if (
+            "no records found" in lowered
+            or "not found" in lowered
+            or "no lccn" in lowered
+            or "no nlm" in lowered
+            or "no call number" in lowered
+            or "no 050" in lowered
+            or "no 060" in lowered
+            or "record found but" in lowered
+        ):
             return None
         if "pyz3950 import failed" in lowered or "pyz3950 import error" in lowered:
             return f"Could not connect to Z39.50 server: {text}"

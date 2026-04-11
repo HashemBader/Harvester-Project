@@ -25,13 +25,14 @@ import csv
 import re
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QPainter, QPen
+from PyQt6.QtGui import QColor, QGuiApplication, QPainter, QPen
 from PyQt6.QtWidgets import (
     QComboBox,
     QFrame,
     QHeaderView,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -128,7 +129,7 @@ class DashboardCard(QFrame):
     """A single KPI metric card with an icon, title label, large numeric value, and helper text.
 
     The card follows the ``Card`` QSS class so it adopts the current theme's
-    surface background, border, and hover highlight automatically.
+    surface background and border automatically.
     """
 
     def __init__(self, title, icon_svg, accent_color="#8aadf4"):
@@ -197,6 +198,8 @@ class RecentResultsPanel(QFrame):
         super().__init__()
         # "Card" class applies themed border/background via QSS
         self.setProperty("class", "Card")
+        self._last_records_key = None
+        self._context_menu_open = False
         self._setup_ui()
 
     def _setup_ui(self):
@@ -217,10 +220,13 @@ class RecentResultsPanel(QFrame):
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.table.verticalHeader().setVisible(False)
         self.table.setShowGrid(False)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         # NoFocus prevents a blue focus ring from appearing when the user clicks the table.
         self.table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        # Disable selection to make the table purely informational (no row highlighting).
-        self.table.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectItems)
+        self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.table.customContextMenuRequested.connect(self._show_context_menu)
         # Hide both scroll bars; height is managed manually by _fit_table_height.
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -238,6 +244,17 @@ class RecentResultsPanel(QFrame):
             records: Sequence of dicts with keys ``isbn``, ``status``, and
                      ``detail``.  Pass an empty list to clear the table.
         """
+        records_key = tuple(
+            (
+                str(record.get("isbn", "")),
+                str(record.get("status", "")),
+                str(record.get("detail", "")),
+            )
+            for record in (records or [])
+        )
+        if self._context_menu_open or records_key == self._last_records_key:
+            return
+        self._last_records_key = records_key
         self.table.setRowCount(0)
         for row_idx, record in enumerate(records):
             self.table.insertRow(row_idx)
@@ -259,6 +276,35 @@ class RecentResultsPanel(QFrame):
             item_detail.setToolTip(detail_text)
             self.table.setItem(row_idx, 2, item_detail)
         self._fit_table_height()
+
+    def _show_context_menu(self, pos):
+        """Show a stable copy menu for the cell under the pointer."""
+        item = self.table.itemAt(pos)
+        if item is None:
+            return
+
+        self.table.setCurrentItem(item)
+        row = item.row()
+        row_values = [
+            self.table.item(row, col).toolTip() or self.table.item(row, col).text()
+            for col in range(self.table.columnCount())
+            if self.table.item(row, col) is not None
+        ]
+
+        menu = QMenu(self.table)
+        copy_cell = menu.addAction("Copy")
+        copy_row = menu.addAction("Copy row")
+
+        self._context_menu_open = True
+        try:
+            action = menu.exec(self.table.viewport().mapToGlobal(pos))
+        finally:
+            self._context_menu_open = False
+
+        if action == copy_cell:
+            QGuiApplication.clipboard().setText(item.toolTip() or item.text())
+        elif action == copy_row:
+            QGuiApplication.clipboard().setText("\t".join(row_values))
 
     def _fit_table_height(self):
         """Resize the table widget to exactly fit all visible rows without a scroll bar.

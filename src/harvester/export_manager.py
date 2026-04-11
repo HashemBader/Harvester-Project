@@ -25,6 +25,7 @@ to the stem (for the ``main`` table) and one with ``_failed`` (for the
 """
 import csv
 import json
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -239,4 +240,6 @@ class ExportManager:
         """
         if field_name in {"date_added", "last_attempted"}:
             return yyyymmdd_to_iso_date(value)
+        if field_name == "last_error" and value is not None:
+            return re.sub(r"(?i)^no records found in .+\.?$", "No records found", str(value).strip())
         return value

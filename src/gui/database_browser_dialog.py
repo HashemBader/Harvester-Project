@@ -19,6 +19,7 @@ Module-level constants:
     ``PAGE_SIZE`` — number of rows displayed per page.
 """
 import sqlite3
+import re
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
@@ -43,6 +44,12 @@ TABLE_COLUMNS = {
     "attempted":    ["isbn", "last_target", "attempt_type", "last_attempted", "fail_count", "last_error"],
     # Col 0: lowest_isbn  Col 1: other_isbn
     "linked_isbns": ["lowest_isbn", "other_isbn"],
+}
+
+TAB_LABELS = {
+    "main": "Main",
+    "attempted": "Attempted",
+    "linked_isbns": "Linked ISBNs",
 }
 
 # Maps each table to the zero-based index of the column used for the source
@@ -281,6 +288,8 @@ class _TableTab(QWidget):
         # Convert compact integer dates to the more readable ISO format.
         if column_name in ("date_added", "last_attempted"):
             return yyyymmdd_to_iso_date(cell) or str(cell)
+        if column_name == "last_error":
+            return re.sub(r"(?i)^no records found in .+\.?$", "No records found", str(cell).strip())
         return str(cell)
 
     def _render_page(self):
@@ -388,12 +397,15 @@ class DatabaseBrowserDialog(QDialog):
 
         # Tabs
         self.tab_widget = QTabWidget()
+        self.tab_widget.setObjectName("DatabaseBrowserTabs")
+        self.tab_widget.setDocumentMode(False)
+        self.tab_widget.tabBar().setCursor(Qt.CursorShape.PointingHandCursor)
         self.tab_widget.currentChanged.connect(self._load_tab)
 
         for tbl in TABLE_COLUMNS:
             tab = _TableTab(tbl, self._db_path, parent=self)
             self._tabs[tbl] = tab
-            self.tab_widget.addTab(tab, tbl)
+            self.tab_widget.addTab(tab, TAB_LABELS.get(tbl, tbl))
 
         root.addWidget(self.tab_widget, stretch=1)
 

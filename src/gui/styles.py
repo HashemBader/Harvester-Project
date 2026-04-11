@@ -270,12 +270,8 @@ QFrame[class="Card"], QFrame.Card {{
     border-radius: 12px;
 }}
 
-QFrame[class="Card"]:hover, QFrame.Card:hover {{
-    border: 1px solid {t['primary']};
-    border-bottom: 2px solid {t['primary']};
-}}
-
-/* Suppress hover highlight on static banner/header frames */
+/* Static cards should not react to the pointer; hover is reserved for real controls. */
+QFrame[class="Card"]:hover, QFrame.Card:hover,
 QFrame#HarvestBanner:hover, QFrame#HelpHeader:hover {{
     border: 1px solid {t['border']};
     border-bottom: 2px solid {t['shadow']};
@@ -304,6 +300,40 @@ QLabel[class="CardValue"], QLabel.CardValue {{
 QLabel[class="CardHelper"], QLabel.CardHelper {{
     color: {t['text_muted']};
     font-size: 11px;
+}}
+
+/* --- Database Browser Tabs --- */
+QTabWidget#DatabaseBrowserTabs::pane {{
+    border: 1px solid {t['border']};
+    border-radius: 8px;
+    top: -1px;
+}}
+
+QTabWidget#DatabaseBrowserTabs QTabBar::tab {{
+    background-color: {t['surface2']};
+    color: {t['text_muted']};
+    border: 1px solid {t['border']};
+    border-bottom: 1px solid {t['border']};
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    min-width: 120px;
+    padding: 10px 18px;
+    margin-right: 6px;
+    font-size: 13px;
+    font-weight: 800;
+}}
+
+QTabWidget#DatabaseBrowserTabs QTabBar::tab:hover {{
+    color: {t['text']};
+    border: 1px solid {t['primary']};
+    background-color: {t['hover']};
+}}
+
+QTabWidget#DatabaseBrowserTabs QTabBar::tab:selected {{
+    background-color: {t['primary']};
+    color: #ffffff;
+    border: 1px solid {t['primary']};
+    border-bottom: 1px solid {t['primary']};
 }}
 
 QLabel[class="ActivityLabel"], QLabel.ActivityLabel {{
@@ -785,7 +815,8 @@ QFrame#DashboardProfilePanel {{
 }}
 
 QFrame#DashboardProfilePanel:hover {{
-    border-color: {t['border_strong']};
+    border: 1px solid {t['border']};
+    border-top: 2px solid {t['border_strong']};
 }}
 
 QLabel#DashboardProfileIcon {{
