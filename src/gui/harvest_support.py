@@ -511,6 +511,11 @@ class HarvestWorker(QThread):
                     )
                     self.run_stats.skipped = payload.get("skipped", 0)
                     self.stats_update.emit(self.run_stats)
+                    return
+
+                if event == "db_flush":
+                    self._refresh_live_linked_isbns_file()
+                    return
 
             targets = self._build_targets()
 

@@ -64,6 +64,11 @@ from src.api.http_utils import urlopen_with_ca
 from src.utils.call_number_validators import validate_lccn, validate_nlmcn
 from src.utils.isbn_validator import normalize_isbn
 
+try:
+    from stdnum import isbn as _stdnum_isbn
+except ImportError:  # pragma: no cover - exercised only in minimal installs
+    _stdnum_isbn = None
+
 
 class HarvardApiClient(BaseApiClient):
     """
@@ -125,6 +130,16 @@ class HarvardApiClient(BaseApiClient):
         if self._has_records(fallback):
             return fallback
 
+        for term in self._identifier_exact_terms(isbn):
+            if term == isbn:
+                continue
+            try:
+                variant = self._request_json(self.build_exact_identifier_url(term))
+            except Exception:
+                continue
+            if self._has_records(variant):
+                return variant
+
         # Return whichever response we have (fallback preferred, then primary) for debugging
         return fallback if fallback is not None else primary
 
@@ -143,6 +158,21 @@ class HarvardApiClient(BaseApiClient):
         # Construct and return the full URL with query string
         return f"{self.base_url}?{urllib.parse.urlencode(params)}"
 
+    def build_exact_identifier_url(self, identifier: str) -> str:
+        """
+        Build a LibraryCloud exact-identifier query URL.
+
+        Harvard's broad ``identifier=`` query can over-match hyphenated ISBNs
+        because hyphens are parsed as search punctuation.  ``identifier_exact``
+        is used only for deliberate ISBN display variants such as hyphenated
+        ISBN-10 values derived from a valid ISBN-13.
+        """
+        params = {
+            "identifier_exact": identifier,
+            "limit": "1",
+        }
+        return f"{self.base_url}?{urllib.parse.urlencode(params)}"
+
     def build_fallback_url(self, isbn: str) -> str:
         """
         Fallback: keyword search across all fields.
@@ -157,6 +187,43 @@ class HarvardApiClient(BaseApiClient):
         }
         # Construct and return the full URL with query string
         return f"{self.base_url}?{urllib.parse.urlencode(params)}"
+
+    def _identifier_exact_terms(self, isbn: str) -> List[str]:
+        """Return exact-identifier ISBN variants worth trying for LibraryCloud."""
+        terms: List[str] = []
+
+        def add(term: Optional[str]) -> None:
+            if term and term not in terms:
+                terms.append(term)
+
+        add(isbn)
+        normalized = normalize_isbn(isbn)
+        add(normalized)
+
+        if not _stdnum_isbn or not normalized:
+            return terms
+
+        candidates: List[str] = []
+        for transform in (
+            lambda value: value,
+            _stdnum_isbn.to_isbn10,
+            _stdnum_isbn.to_isbn13,
+        ):
+            try:
+                candidate = transform(normalized)
+            except Exception:
+                continue
+            if candidate and candidate not in candidates:
+                candidates.append(candidate)
+
+        for candidate in candidates:
+            add(candidate)
+            try:
+                add(_stdnum_isbn.format(candidate))
+            except Exception:
+                pass
+
+        return terms
 
     def _request_json(self, url: str) -> Any:
         """

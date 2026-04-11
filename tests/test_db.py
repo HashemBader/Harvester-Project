@@ -25,6 +25,18 @@ def test_db_init_and_main_roundtrip(tmp_path: Path):
     assert got.source == "LoC"
 
 
+def test_checkpoint_wal_returns_sqlite_checkpoint_status(tmp_path: Path):
+    db_path = tmp_path / "test.sqlite3"
+    db = DatabaseManager(db_path)
+    db.init_db()
+
+    status = db.checkpoint_wal()
+
+    assert status is not None
+    assert len(status) == 3
+    assert all(isinstance(value, int) for value in status)
+
+
 def test_main_stores_one_row_per_call_number_type(tmp_path: Path):
     import sqlite3 as _sqlite3
 

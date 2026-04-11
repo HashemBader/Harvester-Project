@@ -18,6 +18,8 @@ validator modules (lccn_validator, nlmcn_validator, isbn_validator).
 Part of the LCCN Harvester Project.
 """
 
+from src.utils.isbn_validator import strip_isbn_qualifier
+
 
 def normalize_call_number(subfield_a: list[str], subfield_b: list[str] | None = None) -> str:
     """
@@ -85,7 +87,7 @@ def normalize_isbn_subfield(subfield_a_value: str | None) -> str:
         input is blank.
     """
     # Re-use normalize_call_number for consistent whitespace trimming.
-    normalized = normalize_call_number([subfield_a_value or ""])
+    normalized = normalize_call_number([strip_isbn_qualifier(subfield_a_value)])
     if not normalized:
         return ""
 

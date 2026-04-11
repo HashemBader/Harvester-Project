@@ -2,7 +2,7 @@ import os
 import sys
 import pytest
 from unittest.mock import patch, mock_open
-from src.utils.isbn_validator import validate_isbn, log_invalid_isbn, linked_isbns_match
+from src.utils.isbn_validator import validate_isbn, normalize_isbn, log_invalid_isbn, linked_isbns_match
 
 # Add src to path so we can import modules from the project source
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
@@ -51,6 +51,28 @@ def test_validate_isbn_invalid(isbn_input):
         mock_log.assert_called_once()
         # Ensure called with the input string
         assert mock_log.call_args[0][0] == isbn_input
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("9780123786364 (v. 31A)", "9780123786364"),
+        ("0123504406 :", "0123504406"),
+        ("0814792987 (cloth : acid-free paper)", "0814792987"),
+        ("ISBN : 1-4443-6222-4", "1444362224"),
+        ("1-119-94502-X (pbk.)", "111994502X"),
+        ("9780585480565electronic bk.", "9780585480565"),
+        ("9780123786364v31A", "9780123786364"),
+        ("0814793037cloth", "0814793037"),
+    ],
+)
+def test_normalize_isbn_strips_marc_qualifiers_before_validation(raw, expected):
+    """MARC 020 qualifiers should not cause otherwise valid ISBNs to be rejected."""
+    with patch("src.utils.isbn_validator.log_invalid_isbn") as mock_log:
+        assert normalize_isbn(raw) == expected
+        assert validate_isbn(raw) is True
+        mock_log.assert_not_called()
+
 
 def test_log_invalid_isbn_file_write():
     """Test that log_invalid_isbn actually attempts to write to the file."""
