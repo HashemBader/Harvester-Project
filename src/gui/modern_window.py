@@ -37,9 +37,10 @@ from .icons import (
     get_icon, get_pixmap, 
     SVG_DASHBOARD, SVG_TARGETS, SVG_SETTINGS, SVG_RESULTS,
     SVG_HARVEST, SVG_CHEVRON_LEFT, SVG_CHEVRON_RIGHT,
-    SVG_TOGGLE_ON, SVG_TOGGLE_OFF
+    SVG_TOGGLE_ON, SVG_TOGGLE_OFF, SVG_X_CIRCLE
 )
 from src.config.profile_manager import ProfileManager
+from src.database import DatabaseManager
 from .theme_manager import ThemeManager
 
 logger = logging.getLogger(__name__)
@@ -191,6 +192,16 @@ class ModernMainWindow(QMainWindow):
         self.btn_theme.setToolTip("Toggle application theme (dark / light)")
         sidebar_layout.addWidget(self.btn_theme)
 
+        self.btn_exit = QPushButton("Exit")
+        self.btn_exit.setIcon(get_icon(SVG_X_CIRCLE, "#a5adcb"))
+        self.btn_exit.setObjectName("NavButton")
+        self.btn_exit.setProperty("class", "NavButton")
+        self.btn_exit.setProperty("full_text", "Exit")
+        self.btn_exit.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_exit.clicked.connect(self.close)
+        self.btn_exit.setToolTip("Exit application")
+        sidebar_layout.addWidget(self.btn_exit)
+
         main_layout.addWidget(self.sidebar)
 
         # 2. Right Content Area
@@ -285,6 +296,11 @@ class ModernMainWindow(QMainWindow):
             label = btn.property("full_text") or btn.text().strip()
             btn.setAccessibleName(f"Open {label} page")
             btn.setToolTip(f"Open {label}")
+
+        if hasattr(self, "btn_exit"):
+            self.btn_exit.setAccessibleName("Exit application")
+            self.btn_exit.setAccessibleDescription("Close the LCCN Harvester application.")
+            self.btn_exit.setToolTip("Exit application")
 
 
     def _setup_shortcuts(self):
@@ -414,6 +430,14 @@ class ModernMainWindow(QMainWindow):
         # Show / hide sidebar status text on collapse
         if hasattr(self, 'sidebar_status'):
             self.sidebar_status.setVisible(not collapsed)
+
+        if hasattr(self, 'btn_exit'):
+            if collapsed:
+                self.btn_exit.setText("")
+                self.btn_exit.setToolTip("Exit application")
+            else:
+                self.btn_exit.setText("Exit")
+                self.btn_exit.setToolTip("Exit application")
 
         if not collapsed:
             try:
@@ -756,6 +780,13 @@ class ModernMainWindow(QMainWindow):
                 event.ignore()
                 return
             self.harvest_tab.stop_harvest()
+        try:
+            db_path = self._profile_manager.get_db_path(
+                self._profile_manager.get_active_profile()
+            )
+            DatabaseManager(db_path).checkpoint_wal()
+        except Exception:
+            logger.debug("Could not checkpoint SQLite WAL on app close.", exc_info=True)
         event.accept()
     def _toggle_theme(self):
         """Toggle between dark and light themes and apply immediately."""
@@ -786,12 +817,16 @@ class ModernMainWindow(QMainWindow):
                     self.btn_theme.setIcon(get_icon(SVG_TOGGLE_OFF, CATPPUCCIN_LIGHT['text_muted']))
                     if not self.sidebar_collapsed:
                         self.btn_theme.setText("Theme: Light")
+                if hasattr(self, 'btn_exit'):
+                    self.btn_exit.setIcon(get_icon(SVG_X_CIRCLE, CATPPUCCIN_LIGHT['text_muted']))
             else:
                 qss = generate_stylesheet(CATPPUCCIN_DARK)
                 if hasattr(self, 'btn_theme'):
                     self.btn_theme.setIcon(get_icon(SVG_TOGGLE_ON, CATPPUCCIN_DARK['primary']))
                     if not self.sidebar_collapsed:
                         self.btn_theme.setText("Theme: Dark")
+                if hasattr(self, 'btn_exit'):
+                    self.btn_exit.setIcon(get_icon(SVG_X_CIRCLE, CATPPUCCIN_DARK['text_muted']))
                 
             from PyQt6.QtWidgets import QApplication
             app = QApplication.instance()

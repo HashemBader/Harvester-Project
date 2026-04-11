@@ -294,6 +294,54 @@ def test_shared_call_number_does_not_create_implicit_links(tmp_path):
 # 5. Full run() with linked dict
 # ═══════════════════════════════════════════════════════════════════════
 
+def test_target_returned_isbns_create_links_and_keep_requested_isbn_in_event(tmp_path):
+    """A normal harvest should link sibling ISBNs returned by the target record."""
+    db = _make_db(tmp_path / "test.sqlite3")
+
+    requested = "9786613826800"
+    canonical = "1119945011"
+    related = ("1444362224", "1283514354", canonical, "111994502X")
+    target = PerISBNTarget(
+        "Harvard",
+        {
+            requested: TargetResult(
+                success=True,
+                lccn="QA76.73",
+                source="Harvard",
+                isbns=(requested, *related),
+            )
+        },
+    )
+    events = []
+    orch = HarvestOrchestrator(
+        db,
+        targets=[target],
+        call_number_mode="lccn",
+        stop_rule="stop_either",
+        max_workers=2,
+        progress_cb=lambda event, payload: events.append((event, payload)),
+    )
+
+    summary = orch.run([requested], dry_run=False)
+
+    assert summary.successes == 1
+    rec = db.get_main(canonical)
+    assert rec is not None
+    assert rec.lccn == "QA76.73"
+    assert db.get_main(requested) is None
+    assert set(_linked_rows(db)) == {
+        (canonical, "1283514354"),
+        (canonical, "1444362224"),
+        (canonical, "111994502X"),
+        (canonical, requested),
+    }
+    success_payloads = [
+        payload for event, payload in events if event in {"success", "linked_success"}
+    ]
+    assert success_payloads
+    assert success_payloads[-1]["isbn"] == requested
+
+
 def test_run_with_linked_dict(tmp_path):
     """run() dispatches to process_isbn_group when linked variants are present."""
     db = _make_db(tmp_path / "test.sqlite3")

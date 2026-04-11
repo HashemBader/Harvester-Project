@@ -118,7 +118,8 @@ class DatabaseManager:
         active and can corrupt the database if the process is killed.  This
         context manager guarantees the connection is closed after every
         ``with self.connect() as conn:`` block regardless of whether an
-        exception is raised.
+        exception is raised.  Call :meth:`checkpoint_wal` when the app wants to
+        explicitly truncate SQLite's WAL sidecar after a harvest or on exit.
 
         Yields:
             An open ``sqlite3.Connection`` configured with ``Row`` factory and
@@ -146,7 +147,26 @@ class DatabaseManager:
             conn.rollback()
             raise
         finally:
-            conn.close()  # always release – checkpoints WAL and frees the file lock
+            conn.close()  # always release the file lock
+
+
+    def checkpoint_wal(self, truncate: bool = True) -> tuple[int, int, int] | None:
+        """Checkpoint SQLite's WAL journal and optionally truncate the WAL file.
+
+        ``-wal`` and ``-shm`` files are normal when the database is in WAL mode;
+        commits do not delete them.  This helper asks SQLite to move committed
+        WAL frames back into the main database file.  With ``truncate=True`` it
+        also truncates the ``-wal`` file when no other connection is using it.
+        """
+        if not self.db_path.exists():
+            return None
+
+        mode = "TRUNCATE" if truncate else "PASSIVE"
+        with self.connect() as conn:
+            row = conn.execute(f"PRAGMA wal_checkpoint({mode})").fetchone()
+            if row is None:
+                return None
+            return tuple(int(value) for value in row)
 
 
     def _is_db_healthy(self) -> bool:
@@ -511,13 +531,16 @@ class DatabaseManager:
             yield conn
 
     def close(self) -> None:
-        """No-op kept for API compatibility with older call sites.
+        """Checkpoint the WAL for compatibility with older close-style call sites.
 
         ``DatabaseManager`` uses short-lived per-operation connections via
         ``connect()`` and explicit batch transactions via ``transaction()``;
         there is no persistent connection to close.
         """
-        return
+        try:
+            self.checkpoint_wal()
+        except Exception:
+            logger.debug("Could not checkpoint SQLite WAL during close().", exc_info=True)
 
 
 

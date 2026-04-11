@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import urllib.parse
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,6 +56,32 @@ def test_harvard_extracts_classification_with_authority_lcc() -> None:
     assert result.lccn == "PS3562.E353 T6 2002"
 
 
+def test_harvard_extracts_related_isbns_with_labels_and_qualifiers() -> None:
+    client = HarvardApiClient()
+    payload = {
+        "pagination": {"numFound": 1},
+        "items": {
+            "mods": [
+                {
+                    "classification": [
+                        {"@authority": "lcc", "#text": "QA76.73"}
+                    ],
+                    "identifier": [
+                        {"@type": "isbn", "#text": "9780123786364 (v. 31A)"},
+                        {"@type": "isbn", "#text": "0814792987 (cloth : acid-free paper)"},
+                        "ISBN : 1-4443-6222-4",
+                    ],
+                }
+            ]
+        },
+    }
+
+    result = client.extract_call_numbers("9780123786364", payload)
+
+    assert result.status == "success"
+    assert result.isbns == ["9780123786364", "0814792987", "1444362224"]
+
+
 def test_harvard_items_mods_shape_detected_as_records() -> None:
     client = HarvardApiClient()
     payload = {"pagination": {"numFound": 1}, "items": {"mods": [{}]}}
@@ -66,6 +93,39 @@ def test_harvard_build_fallback_uses_keyword_query() -> None:
     url = client.build_fallback_url("9780451524935")
     assert "q=9780451524935" in url
     assert "identifier%3A" not in url
+
+
+def test_harvard_fetch_tries_hyphenated_isbn10_exact_variant() -> None:
+    class StubHarvardClient(HarvardApiClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.urls: list[str] = []
+
+        def _request_json(self, url: str):
+            self.urls.append(url)
+            query = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+            if query.get("identifier_exact") == ["0-585-31700-3"]:
+                return {
+                    "pagination": {"numFound": 1},
+                    "items": {
+                        "mods": [
+                            {
+                                "classification": [
+                                    {"@authority": "lcc", "#text": "HV5825 .J46 1999"}
+                                ]
+                            }
+                        ]
+                    },
+                }
+            return {"pagination": {"numFound": 0}, "items": {"mods": []}}
+
+    client = StubHarvardClient()
+
+    payload = client.fetch("9780585317007")
+
+    assert client._has_records(payload)
+    assert any("identifier_exact=0-585-31700-3" in url for url in client.urls)
+    assert not any("identifier=0-585-31700-3" in url for url in client.urls)
 
 
 # ---------------------------------------------------------------------------

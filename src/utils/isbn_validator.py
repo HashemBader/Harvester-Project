@@ -66,6 +66,69 @@ except ImportError:
 INVALID_ISBN_LOG = Path("invalid_isbns.log")
 
 
+def strip_isbn_qualifier(isbn_str: str | None) -> str:
+    """Return the ISBN portion before MARC-style qualifiers.
+
+    MARC 020 $a values often append binding/volume notes after the ISBN, for
+    example ``"0814792987 (cloth : acid-free paper)"``.  Harvard also exposes
+    some identifiers with a leading ``"ISBN :"`` label.  Remove those wrappers
+    before checksum validation so the valid ISBN itself is not discarded.
+    """
+    text = str(isbn_str or "").strip()
+    if not text:
+        return ""
+
+    text = re.sub(r"^ISBN(?:-1[03])?\s*:?\s*", "", text, flags=re.IGNORECASE)
+
+    for match in re.finditer(r"\s+|\(", text):
+        start = match.start()
+        if text[start] == "(":
+            return text[:start].strip()
+
+        remainder = text[match.end() :].lstrip()
+        if not remainder or remainder[0] in "(:;[" or remainder[0].isalpha():
+            return text[:start].strip()
+
+    return text.strip()
+
+
+def _isbn_chars_only(isbn_str: str) -> str:
+    """Return only ISBN characters, preserving a possible ISBN-10 ``X``."""
+    return re.sub(r"[^0-9Xx]", "", isbn_str).upper()
+
+
+def _cleaned_prefix_shape(candidate: str, length: int) -> bool:
+    """Return True when the prefix has characters allowed for that ISBN length."""
+    if len(candidate) != length:
+        return False
+    if length == 13:
+        return candidate.isdigit()
+    return candidate[:9].isdigit() and (candidate[9].isdigit() or candidate[9] == "X")
+
+
+def _valid_isbn_prefix(isbn_str: str) -> str:
+    """Return the first valid 13- or 10-character ISBN prefix, if present.
+
+    Some source records append qualifiers without a clean delimiter after the
+    ISBN.  After removing punctuation such as hyphens, the useful ISBN is the
+    first 10 or 13 characters and everything after that is descriptive text.
+    """
+    cleaned = _isbn_chars_only(strip_isbn_qualifier(isbn_str))
+
+    for length in (13, 10):
+        prefix = cleaned[:length]
+        if not _cleaned_prefix_shape(prefix, length):
+            continue
+        if STDNUM_AVAILABLE:
+            try:
+                return stdnum_isbn.validate(prefix)
+            except Exception:
+                continue
+        return prefix
+
+    return ""
+
+
 def log_invalid_isbn(isbn_value: str, reason: str = messages.GuiMessages.warn_title_invalid) -> None:
     """
     Append an invalid ISBN entry to the invalid ISBN log file.
@@ -106,11 +169,15 @@ def _simple_normalize_isbn(isbn_str: str) -> str:
         cleaned string is not a valid length.
     """
     # Strip everything except digits and the letter X (ISBN-10 check character).
-    cleaned = re.sub(r'[^0-9Xx]', '', isbn_str)
+    cleaned = _isbn_chars_only(strip_isbn_qualifier(isbn_str))
 
     # ISBN-10 is 10 characters; ISBN-13 is 13 characters.
     if len(cleaned) in (10, 13):
         return cleaned.upper()
+    for length in (13, 10):
+        prefix = cleaned[:length]
+        if _cleaned_prefix_shape(prefix, length):
+            return prefix
     return ""
 
 
@@ -198,11 +265,16 @@ def normalize_isbn(isbn_str: str) -> str:
         Normalised ISBN string (digits + optional ``X``), or ``""`` on
         failure.
     """
+    candidate = strip_isbn_qualifier(isbn_str)
+
     if STDNUM_AVAILABLE:
         try:
-            normalized_isbn_str = stdnum_isbn.validate(isbn_str)
+            normalized_isbn_str = stdnum_isbn.validate(candidate)
             return normalized_isbn_str
         except Exception:
+            prefix = _valid_isbn_prefix(candidate)
+            if prefix:
+                return prefix
             log_invalid_isbn(isbn_str, messages.GuiMessages.warn_title_invalid)
             return ""
     else:
@@ -321,11 +393,15 @@ def validate_isbn(isbn_str: str) -> bool:
     -------
     bool
     """
+    candidate = strip_isbn_qualifier(isbn_str)
+
     if STDNUM_AVAILABLE:
         try:
-            stdnum_isbn.validate(isbn_str)
+            stdnum_isbn.validate(candidate)
             return True
         except Exception:
+            if _valid_isbn_prefix(candidate):
+                return True
             log_invalid_isbn(isbn_str, messages.GuiMessages.warn_title_invalid)
             return False
     else:

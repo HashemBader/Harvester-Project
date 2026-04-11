@@ -43,15 +43,18 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+import logging
+import re
 from typing import Callable, Optional, Protocol
 
 from src.database import DatabaseManager, MainRecord, now_datetime_str
-from src.utils.isbn_validator import pick_lowest_isbn
+from src.utils.isbn_validator import pick_lowest_isbn, strip_isbn_qualifier
 
 # Callback types used for real-time harvest progress reporting.
 # event examples: "isbn_start", "cached", "skip_retry", "target_start", "success", "failed"
 ProgressCallback = Callable[[str, dict], None]
 CancelCheck = Callable[[], bool]
+logger = logging.getLogger(__name__)
 
 
 def _friendly_target_error(raw: str) -> str:
@@ -175,6 +178,7 @@ class ProcessOutcome:
     status: str
     record: Optional[MainRecord]
     attempted_rows: tuple[tuple[str, Optional[str], str, Optional[str], Optional[str]], ...]
+    linked_pairs: tuple[tuple[str, str], ...] = ()
 
 
 class HarvestCancelled(Exception):
@@ -537,6 +541,70 @@ class HarvestOrchestrator:
             },
         )
 
+    @staticmethod
+    def _append_unique_linked_pairs(
+        pending_linked: Optional[list[tuple[str, str]]],
+        pairs: tuple[tuple[str, str], ...],
+    ) -> None:
+        """Append linked-ISBN pairs to a batch buffer without duplicating rows."""
+        if pending_linked is None or not pairs:
+            return
+        existing = set(pending_linked)
+        for lowest_isbn, other_isbn in pairs:
+            if lowest_isbn and other_isbn and lowest_isbn != other_isbn:
+                pair = (lowest_isbn, other_isbn)
+                if pair not in existing:
+                    pending_linked.append(pair)
+                    existing.add(pair)
+
+    def _linked_pairs_for_discovered_isbns(
+        self,
+        candidates: list[str],
+    ) -> tuple[str, tuple[tuple[str, str], ...]]:
+        """Return the lowest ISBN and link pairs for ISBNs found on one record."""
+        normalized: list[str] = []
+        for index, candidate in enumerate(candidates):
+            raw_value = str(candidate or "").strip()
+            if not raw_value:
+                continue
+            cleaned = re.sub(r"[^0-9Xx]", "", strip_isbn_qualifier(raw_value)).upper()
+            if len(cleaned) in (10, 13):
+                value = cleaned
+            elif index < 2:
+                value = raw_value
+            else:
+                continue
+            if value and value not in normalized:
+                normalized.append(value)
+
+        if not normalized:
+            raise ValueError("At least one ISBN is required")
+
+        expanded: list[str] = []
+        for value in normalized:
+            for candidate in (self.db.get_lowest_isbn(value), value):
+                if candidate and candidate not in expanded:
+                    expanded.append(candidate)
+
+        lowest = pick_lowest_isbn(expanded)
+        pairs = tuple(
+            (lowest, other)
+            for other in expanded
+            if other and other != lowest
+        )
+        return lowest, pairs
+
+    @staticmethod
+    def _retarget_attempted_rows(
+        rows: list[tuple[str, Optional[str], str, Optional[str], Optional[str]]],
+        isbn: str,
+    ) -> tuple[tuple[str, Optional[str], str, Optional[str], Optional[str]], ...]:
+        """Return attempted rows rewritten to the canonical ISBN key."""
+        return tuple(
+            (isbn, target, attempt_type, attempted_time, error)
+            for _, target, attempt_type, attempted_time, error in rows
+        )
+
     def _process_isbn_internal(
         self,
         isbn: str,
@@ -544,6 +612,7 @@ class HarvestOrchestrator:
         dry_run: bool,
         pending_main: list[MainRecord],
         pending_attempted: list[tuple[str, Optional[str], str, Optional[str], Optional[str]]],
+        pending_linked: Optional[list[tuple[str, str]]] = None,
         emit_terminal: bool = True,
     ) -> ProcessOutcome:
         """Core single-ISBN processing logic shared by sequential and parallel paths.
@@ -568,6 +637,7 @@ class HarvestOrchestrator:
             dry_run:          When ``True``, results are computed but not written.
             pending_main:     Mutable list; successful ``MainRecord``s are appended here.
             pending_attempted: Mutable list; failed-attempt tuples are appended here.
+            pending_linked:   Mutable list; linked-ISBN pairs are appended here.
             emit_terminal:    When ``False``, suppress final cache/success/failure
                 events so a linked-ISBN group can probe candidates quietly and
                 emit one terminal outcome for the group as a whole.
@@ -582,6 +652,7 @@ class HarvestOrchestrator:
         # API lookups still use the original isbn so the request matches the input.
         store_isbn = self.db.get_lowest_isbn(isbn)
         is_linked_input = store_isbn != isbn
+        discovered_isbns: list[str] = [isbn, store_isbn]
 
         cached_rec = None
         found_lccn: Optional[str] = None
@@ -650,6 +721,10 @@ class HarvestOrchestrator:
             raw_result = target.lookup(isbn)
             attempt_time = now_datetime_str()
             source_name = raw_result.source or last_target
+            for related_isbn in raw_result.isbns:
+                related = str(related_isbn or "").strip()
+                if related and related not in discovered_isbns:
+                    discovered_isbns.append(related)
 
             if self.call_number_mode == "lccn":
                 result = self._filter_result_by_mode(raw_result)
@@ -712,14 +787,15 @@ class HarvestOrchestrator:
 
         # Check if we accumulated a fully successful result.
         if has_partial_result and (not requires_both_for_success or has_complete_result):
+            final_store_isbn, linked_pairs = self._linked_pairs_for_discovered_isbns(discovered_isbns)
             rec = self._build_record(
-                isbn=store_isbn,
+                isbn=final_store_isbn,
                 lccn=best_lccn,
                 lccn_source=best_lccn_source,
                 nlmcn=best_nlmcn,
                 nlmcn_source=best_nlmcn_source,
             )
-            event_name = "linked_success" if is_linked_input else "success"
+            event_name = "linked_success" if final_store_isbn != isbn or is_linked_input else "success"
             if emit_terminal:
                 self._emit_result(event_name, isbn=isbn, target=rec.source or "Unknown", record=rec)
 
@@ -727,14 +803,17 @@ class HarvestOrchestrator:
                 rec = None
             else:
                 pending_main.append(rec)
-            if not dry_run and attempted_rows:
-                pending_attempted.extend(attempted_rows)
+                self._append_unique_linked_pairs(pending_linked, linked_pairs)
+            attempted_rows_final = self._retarget_attempted_rows(attempted_rows, final_store_isbn)
+            if not dry_run and attempted_rows_final:
+                pending_attempted.extend(attempted_rows_final)
 
-            return ProcessOutcome("success", rec, tuple(attempted_rows))
+            return ProcessOutcome("success", rec, attempted_rows_final, linked_pairs)
 
         if has_partial_result:
+            final_store_isbn, linked_pairs = self._linked_pairs_for_discovered_isbns(discovered_isbns)
             rec = self._build_record(
-                isbn=store_isbn,
+                isbn=final_store_isbn,
                 lccn=best_lccn,
                 lccn_source=best_lccn_source,
                 nlmcn=best_nlmcn,
@@ -756,8 +835,12 @@ class HarvestOrchestrator:
 
             if not dry_run:
                 pending_main.append(rec)
-                if attempted_rows:
-                    pending_attempted.extend(attempted_rows)
+                self._append_unique_linked_pairs(pending_linked, linked_pairs)
+                attempted_rows_final = self._retarget_attempted_rows(attempted_rows, final_store_isbn)
+                if attempted_rows_final:
+                    pending_attempted.extend(attempted_rows_final)
+            else:
+                attempted_rows_final = self._retarget_attempted_rows(attempted_rows, final_store_isbn)
 
             if emit_terminal:
                 self._emit(
@@ -770,7 +853,7 @@ class HarvestOrchestrator:
                         other_errors=other_errors,
                     ),
                 )
-            return ProcessOutcome("failed", rec if dry_run else None, tuple(attempted_rows))
+            return ProcessOutcome("failed", rec if dry_run else None, attempted_rows_final, linked_pairs)
 
         if skipped_retry_targets and not not_found_targets and not other_errors:
             if emit_terminal:
@@ -842,13 +925,14 @@ class HarvestOrchestrator:
             dry_run=dry_run,
             pending_main=pending_main,
             pending_attempted=pending_attempted,
+            pending_linked=pending_linked,
         )
         # If this ISBN resolves to a lower canonical already in linked_isbns,
         # queue the pair so the batch flush rewrites any old rows stored under isbn.
         if pending_linked is not None:
             store_isbn = self.db.get_lowest_isbn(isbn)
             if store_isbn != isbn:
-                pending_linked.append((store_isbn, isbn))
+                self._append_unique_linked_pairs(pending_linked, ((store_isbn, isbn),))
         return outcome.status
 
     def process_isbn_group(
@@ -882,6 +966,7 @@ class HarvestOrchestrator:
 
         winning_record: Optional[MainRecord] = None
         winning_isbn: Optional[str] = None
+        winning_linked_pairs: tuple[tuple[str, str], ...] = ()
 
         for candidate in all_isbns:
             self._check_cancelled()
@@ -895,6 +980,7 @@ class HarvestOrchestrator:
             if outcome.status in ("success", "cached"):
                 winning_record = outcome.record
                 winning_isbn = candidate
+                winning_linked_pairs = outcome.linked_pairs
                 break
 
         if winning_record is None:
@@ -909,6 +995,11 @@ class HarvestOrchestrator:
 
         # --- We have a result.  Write under canonical_isbn. ---
         source_label = winning_record.source or winning_isbn or "Linked ISBN"
+        canonical_candidates = list(all_isbns)
+        canonical_candidates.append(winning_record.isbn)
+        for lowest_isbn, other_isbn in winning_linked_pairs:
+            canonical_candidates.extend([lowest_isbn, other_isbn])
+        canonical_isbn, linked_pairs = self._linked_pairs_for_discovered_isbns(canonical_candidates)
 
         canonical_rec = self._build_record(
             isbn=canonical_isbn,
@@ -926,18 +1017,12 @@ class HarvestOrchestrator:
 
         self._emit_result(
             "success" if winning_isbn == canonical_isbn else "linked_success",
-            isbn=canonical_isbn, target=source_label, record=canonical_rec,
+            isbn=primary_isbn, target=source_label, record=canonical_rec,
         )
 
         # Only record the linked mapping; do not keep non-canonical ISBN rows in main.
-        linked_pairs: list[tuple[str, str]] = [
-            (canonical_isbn, other_isbn)
-            for other_isbn in all_isbns
-            if other_isbn != canonical_isbn
-        ]
-
         if not dry_run:
-            pending_linked.extend(linked_pairs)
+            self._append_unique_linked_pairs(pending_linked, linked_pairs)
 
         return "success"
 
@@ -1112,203 +1197,17 @@ class HarvestOrchestrator:
                     )
                     return status, local_main, local_attempted, local_linked
 
-                cached_rec = None
-                found_lccn: Optional[str] = None
-                found_lccn_source: Optional[str] = None
-                found_nlmcn: Optional[str] = None
-                found_nlmcn_source: Optional[str] = None
-                if isbn not in self.bypass_cache_isbns:
-                    store_isbn_for_cache = self.db.get_lowest_isbn(isbn)
-                    cached_rec = self.db.get_main(store_isbn_for_cache, allowed_sources=self._allowed_cached_sources())
-                    is_linked_input = store_isbn_for_cache != isbn
-                else:
-                    is_linked_input = False
-                if cached_rec is not None:
-                    found_lccn = cached_rec.lccn
-                    found_lccn_source = getattr(cached_rec, "lccn_source", None) or cached_rec.source
-                    found_nlmcn = cached_rec.nlmcn
-                    found_nlmcn_source = getattr(cached_rec, "nlmcn_source", None) or cached_rec.source
-                    if self._should_stop_with_found(bool(found_lccn), bool(found_nlmcn)):
-                        event_name = "linked_cached" if is_linked_input else "cached"
-                        self._emit(event_name, {
-                            "isbn": isbn,
-                            "source": cached_rec.source,
-                            "lccn": cached_rec.lccn,
-                            "lccn_source": found_lccn_source,
-                            "nlmcn": cached_rec.nlmcn,
-                            "nlmcn_source": found_nlmcn_source,
-                        })
-                        return ("cached", [], [], [])
-
-                # db_only: skip all API targets
-                if self.db_only:
-                    self._emit("not_in_local_catalog", {"isbn": isbn})
-                    return ("not_in_local_catalog", [], (), [])
-
-                last_error = None
-                last_target = None
-                not_found_targets: list[str] = []
-                other_errors: list[tuple[str, str]] = []
-                skipped_retry_targets: list[str] = []
-                attempted_rows: list[tuple[str, Optional[str], str, Optional[str], Optional[str]]] = []
-
-                # Accumulate best results and apply stop_rule (mirrors process_isbn)
-                best_lccn: Optional[str] = found_lccn
-                best_lccn_source: Optional[str] = found_lccn_source
-                best_nlmcn: Optional[str] = found_nlmcn
-                best_nlmcn_source: Optional[str] = found_nlmcn_source
-
-                for target in self.targets:
-                    self._check_cancelled()
-                    last_target = getattr(target, "name", target.__class__.__name__)
-                    required_types = self._required_types(bool(best_lccn), bool(best_nlmcn))
-                    if not required_types:
-                        break
-
-                    if isbn not in self.bypass_retry_isbns and all(
-                        self.db.should_skip_retry(
-                            isbn,
-                            last_target,
-                            call_number_type,
-                            retry_days=self.retry_days,
-                        )
-                        for call_number_type in required_types
-                    ):
-                        skipped_retry_targets.append(last_target)
-                        continue
-
-                    self._emit("target_start", {"isbn": isbn, "target": last_target})
-
-                    raw_result = target.lookup(isbn)
-                    attempt_time = now_datetime_str()
-                    result = self._filter_result_by_mode(raw_result) if self.call_number_mode != "both" else raw_result
-                    if result.success:
-                        if result.lccn and not best_lccn:
-                            best_lccn = result.lccn
-                            best_lccn_source = result.source or last_target
-                        if result.nlmcn and not best_nlmcn:
-                            best_nlmcn = result.nlmcn
-                            best_nlmcn_source = result.source or last_target
-
-                        should_stop = False
-                        if self.call_number_mode == "both":
-                            if self.stop_rule == "stop_either":
-                                should_stop = True
-                            elif self.stop_rule == "stop_lccn" and best_lccn:
-                                should_stop = True
-                            elif self.stop_rule == "stop_nlmcn" and best_nlmcn:
-                                should_stop = True
-                            elif self.stop_rule == "continue_both" and best_lccn and best_nlmcn:
-                                should_stop = True
-                        else:
-                            should_stop = True
-
-                        if should_stop:
-                            break
-
-                        # Not stopping yet — continue to next target for the missing counterpart.
-                        continue
-
-                    last_error = _friendly_target_error(result.error or "")
-                    err = (result.error or "").strip()
-                    friendly_err = _friendly_target_error(err)
-                    if err.lower().startswith("no records found"):
-                        not_found_targets.append(last_target)
-                    elif err:
-                        other_errors.append((last_target, friendly_err))
-                    for call_number_type in required_types:
-                        reason = friendly_err or f"No {self._type_label(call_number_type)} call number"
-                        attempted_rows.append((isbn, last_target, call_number_type, attempt_time, reason))
-                        self._emit_attempt_failure(
-                            isbn=isbn,
-                            target=last_target,
-                            call_number_type=call_number_type,
-                            attempted_date=attempt_time,
-                            reason=reason,
-                        )
-
-                has_partial_result = bool(best_lccn or best_nlmcn)
-                requires_both_for_success = (
-                    self.call_number_mode == "both" and self.stop_rule == "continue_both"
+                local_main: list[MainRecord] = []
+                local_attempted: list[tuple[str, Optional[str], str, Optional[str], Optional[str]]] = []
+                local_linked: list[tuple[str, str]] = []
+                status = self.process_isbn(
+                    isbn,
+                    dry_run=dry_run,
+                    pending_main=local_main,
+                    pending_attempted=local_attempted,
+                    pending_linked=local_linked,
                 )
-                has_complete_result = self._should_stop_with_found(bool(best_lccn), bool(best_nlmcn))
-
-                if has_partial_result and (not requires_both_for_success or has_complete_result):
-                    rec = self._build_record(
-                        isbn=isbn,
-                        lccn=best_lccn,
-                        lccn_source=best_lccn_source,
-                        nlmcn=best_nlmcn,
-                        nlmcn_source=best_nlmcn_source,
-                    )
-                    self._emit_result("success", isbn=isbn, target=rec.source or "Unknown", record=rec)
-                    if dry_run:
-                        return ("success", [], attempted_rows, [])
-                    return ("success", [rec], attempted_rows, [])
-
-                if has_partial_result:
-                    rec = self._build_record(
-                        isbn=isbn,
-                        lccn=best_lccn,
-                        lccn_source=best_lccn_source,
-                        nlmcn=best_nlmcn,
-                        nlmcn_source=best_nlmcn_source,
-                    )
-                    found_labels = []
-                    missing_labels = []
-                    if best_lccn:
-                        found_labels.append("LCCN")
-                    else:
-                        missing_labels.append("LCCN")
-                    if best_nlmcn:
-                        found_labels.append("NLMCN")
-                    else:
-                        missing_labels.append("NLMCN")
-                    last_error = (
-                        f"Found {' and '.join(found_labels)} only; missing {' and '.join(missing_labels)}"
-                    )
-
-                    self._emit("failed", self._build_failed_payload(
-                        isbn=isbn,
-                        last_target=last_target,
-                        last_error=last_error,
-                        not_found_targets=not_found_targets,
-                        other_errors=other_errors,
-                    ))
-
-                    return ("failed", [] if dry_run else [rec], attempted_rows, [])
-
-                if skipped_retry_targets and not not_found_targets and not other_errors:
-                    self._emit(
-                        "skip_retry",
-                        {
-                            "isbn": isbn,
-                            "retry_days": self.retry_days,
-                            "targets": skipped_retry_targets,
-                            "attempt_type": self.call_number_mode,
-                        },
-                    )
-                    return ("skip_retry", [], [], [])
-
-                if not_found_targets and not other_errors:
-                    last_error = "No records found"
-                elif not_found_targets and other_errors:
-                    last_error = (
-                        "Other errors: "
-                        + " ; ".join(f"{t}: {e}" for t, e in other_errors)
-                    )
-                elif other_errors:
-                    last_error = " ; ".join(f"{t}: {e}" for t, e in other_errors)
-
-                self._emit("failed", self._build_failed_payload(
-                    isbn=isbn,
-                    last_target=last_target,
-                    last_error=last_error,
-                    not_found_targets=not_found_targets,
-                    other_errors=other_errors,
-                ))
-
-                return ("failed", [], attempted_rows, [])
+                return status, local_main, local_attempted, local_linked
 
             with ThreadPoolExecutor(max_workers=self.max_workers) as ex:
                 # ex.map preserves input order, so each result corresponds to
@@ -1354,6 +1253,11 @@ class HarvestOrchestrator:
 
         # Flush any trailing buffered writes so short runs are persisted.
         flush()
+        if not dry_run:
+            try:
+                self.db.checkpoint_wal()
+            except Exception:
+                logger.debug("Could not checkpoint SQLite WAL after harvest.", exc_info=True)
 
         return HarvestSummary(
             total_isbns=len(isbns),
