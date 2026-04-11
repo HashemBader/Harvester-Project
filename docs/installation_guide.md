@@ -1,6 +1,6 @@
 # Installation Guide — LCCN Harvester
 
-**Version 1.0.0 · UPEI Library**
+**Version 1.0.0**
 
 How to install and run LCCN Harvester on macOS, Windows, or Linux — either as a packaged executable or directly from source.
 
