@@ -1,6 +1,6 @@
 # LCCN Harvester
 
-A desktop application for UPEI Library that automatically retrieves Library of Congress Call Numbers (LCCNs) and National Library of Medicine Call Numbers (NLMCNs) for large lists of ISBNs.
+A desktop application that automatically retrieves Library of Congress Call Numbers (LCCNs) and National Library of Medicine Call Numbers (NLMCNs) for large lists of ISBNs.
 
 Instead of searching multiple library catalogues manually, cataloguers upload a single TSV file. The application queries multiple sources in priority order, caches results locally, and produces structured output files ready for import into the library management system.
 
@@ -73,5 +73,3 @@ config/         Profile JSON files, targets configuration
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
-UPEI Library · CS4820 / CS4810 Software Engineering Project

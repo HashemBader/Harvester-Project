@@ -1,6 +1,6 @@
 # User Guide — LCCN Harvester
 
-**Version 1.0.0 · UPEI Library**
+**Version 1.0.0**
 
 This guide explains how to use the LCCN Harvester desktop application to look up Library of Congress Call Numbers (LCCNs) and National Library of Medicine Call Numbers (NLMCNs) for a list of ISBNs.
 
@@ -204,18 +204,18 @@ The Dashboard refreshes automatically when a harvest completes or when you switc
 
 ## Keyboard Shortcuts
 
-| Action | macOS | Windows / Linux |
-|--------|-------|-----------------|
-| Toggle sidebar | Control+B | Ctrl+B |
-| Quit | Control+Q | Ctrl+Q |
-| Refresh Dashboard | Control+R | Ctrl+R |
-| Open Dashboard | Control+1 | Ctrl+1 |
-| Open Configure | Control+2 | Ctrl+2 |
-| Open Harvest | Control+3 | Ctrl+3 |
-| Open Help | Control+4 | Ctrl+4 |
-| Start harvest | Control+H | Ctrl+H |
-| Stop harvest | Esc | Esc |
-| Cancel harvest | Control+. | Ctrl+. |
+| Action | macOS | Windows | Linux |
+|--------|-------|---------|-------|
+| Toggle sidebar | Control+B | Ctrl+B | Ctrl+B |
+| Quit | Control+Q | Ctrl+Q | Ctrl+Q |
+| Refresh Dashboard | Control+R | Ctrl+R | Ctrl+R |
+| Open Dashboard | Control+1 | Ctrl+1 | Ctrl+1 |
+| Open Configure | Control+2 | Ctrl+2 | Ctrl+2 |
+| Open Harvest | Control+3 | Ctrl+3 | Ctrl+3 |
+| Open Help | Control+4 | Ctrl+4 | Ctrl+4 |
+| Start harvest | Control+H | Ctrl+H | Ctrl+H |
+| Stop harvest | Esc | Esc | Esc |
+| Cancel harvest | Control+. | Ctrl+. | Ctrl+. |
 
 ---
 

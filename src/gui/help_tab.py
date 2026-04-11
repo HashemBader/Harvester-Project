@@ -1,77 +1,57 @@
-"""Help page — keyboard shortcuts, accessibility overview, and statement page.
+"""Help page — keyboard shortcuts, accessibility overview, and support links.
 
-``HelpTab`` uses a small internal ``QStackedWidget``:
-- Page 0: the main Help Center overview.
-- Page 1: a full accessibility statement page embedded in the tab itself.
-
-This mirrors the in-tab navigation pattern used elsewhere in the app, so the
-accessibility statement behaves like a real page instead of a popup dialog.
-The tab remains theme-aware: ``ModernMainWindow`` calls ``refresh_theme`` to
-update inline-styled labels and panels without rebuilding the widget tree.
+The Help tab keeps a single overview page and routes supporting resources to
+browser-friendly URLs. This includes the accessibility statement, which opens
+the repository-hosted WCAG notes for the current checkout/fork.
 """
 import sys
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QUrl, pyqtSignal
+from PyQt6.QtGui import QDesktopServices
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QFrame, QPushButton, QSizePolicy, QStackedWidget, QTextBrowser,
+    QFrame, QPushButton, QSizePolicy, QStackedWidget, QMessageBox,
 )
 
-from .accessibility_statement_dialog import load_accessibility_statement
+from src.config.help_links import (
+    ACCESSIBILITY_STATEMENT_URL,
+    SUPPORT_GUIDANCE_URL,
+    USER_GUIDE_URL,
+    resolve_help_link_target,
+)
 from .icons import get_pixmap, SVG_RESULTS, SVG_SETTINGS, SVG_CHECK_CIRCLE, SVG_ACTIVITY
 from .styles import CATPPUCCIN_DARK, CATPPUCCIN_LIGHT
 from .theme_manager import ThemeManager
 
 
 class HelpTab(QWidget):
-    """Redesigned Help tab — fills available space, no scroll, modern KBD key styling.
-
-    Signals:
-        page_title_changed(str): Emitted when the active Help sub-page changes
-            so the main window header can stay in sync.
-    """
+    """Redesigned Help tab — fills available space, no scroll, modern KBD key styling."""
 
     page_title_changed = pyqtSignal(str)
 
     def __init__(self, shortcut_modifier: str = "Ctrl"):
         super().__init__()
         self._shortcut_modifier = shortcut_modifier
-        self.platform = "mac" if sys.platform == "darwin" else "win_linux"
+        self.platform_name = self._detect_platform_name()
 
-        # Resolve current theme colours once at startup so KBD badges are correct
         try:
             tm = ThemeManager()
             self._colors = CATPPUCCIN_DARK if tm.get_theme() == "dark" else CATPPUCCIN_LIGHT
         except Exception:
             self._colors = CATPPUCCIN_DARK
 
-        # Widget registries — populated during _setup_ui so refresh_theme can
-        # iterate them in O(n) without walking the full widget tree.
-        self._kbd_labels: list[QLabel] = []                        # <kbd>-style key badge labels
-        self._dividers: list[QFrame] = []                          # horizontal rule QFrames
-        self._panel_frames: list[QFrame] = []                      # main panels (no hover border)
-        self._desc_labels: list[QLabel] = []                       # shortcut descriptions + accessibility items
-        self._plus_labels: list[QLabel] = []                       # "+" separators between key badges
-        self._section_labels: list[QLabel] = []                    # category headers inside shortcut panel
-        self._text_labels: list[tuple[QLabel, str]] = []           # (label, format-string containing {color})
+        self._kbd_labels: list[QLabel] = []
+        self._dividers: list[QFrame] = []
+        self._panel_frames: list[QFrame] = []
+        self._desc_labels: list[QLabel] = []
+        self._plus_labels: list[QLabel] = []
+        self._section_labels: list[QLabel] = []
+        self._text_labels: list[tuple[QLabel, str]] = []
 
         self._setup_ui()
 
-    # ──────────────────────────────────────────────────────────────────
-    # Public API – called by ModernMainWindow on theme toggle
-    # ──────────────────────────────────────────────────────────────────
     def refresh_theme(self, colors: dict) -> None:
-        """Apply new theme colours to every inline-styled widget in this tab.
-
-        Called by ``ModernMainWindow._apply_theme`` after the application
-        stylesheet is replaced, so that inline styles not covered by QSS are
-        also updated without rebuilding the layout.
-
-        Args:
-            colors: A theme palette dict (e.g. ``CATPPUCCIN_DARK`` or
-                    ``CATPPUCCIN_LIGHT``) containing at least the keys used by
-                    the ``_*_style`` helpers below.
-        """
+        """Apply new theme colours to every inline-styled widget in this tab."""
         self._colors = colors
         kbd_style = self._kbd_style()
         for lbl in self._kbd_labels:
@@ -110,34 +90,26 @@ class HelpTab(QWidget):
                 f"}}"
             )
 
-    # ──────────────────────────────────────────────────────────────────
-    # Style helpers — each returns a self-contained inline stylesheet string
-    # ──────────────────────────────────────────────────────────────────
     def _kbd_style(self) -> str:
-        """Return inline CSS for keyboard key badge labels (the <kbd>-style boxes)."""
         c = self._colors
         return (
             f"background-color: {c.get('surface2', '#374151')};"
             f"color: {c.get('text', '#f9fafb')};"
             f"border: 1px solid {c.get('border_strong', '#6b7280')};"
             f"border-bottom: 2px solid {c.get('shadow', '#030712')};"
-            f"border-radius: 5px;"
-            f"padding: 4px 10px;"
+            f"border-radius: 6px;"
+            f"padding: 5px 12px;"
             f"font-family: 'SF Mono','Consolas','Courier New',monospace;"
             f"font-size: 12px;"
             f"font-weight: 700;"
-            f"letter-spacing: 0;"
+            f"letter-spacing: 0.3px;"
         )
 
     def _panel_style(self) -> str:
-        """Inline stylesheet for the two main panels.
-        Uses objectName selector so the Card class hover rule (blue border)
-        is overridden — panels should never flash blue on mouse-over.
-        """
         c = self._colors
-        bg     = c.get("surface",       "#1f2937")
-        border = c.get("border",        "#4b5563")
-        shadow = c.get("shadow",        "#030712")
+        bg = c.get("surface", "#1f2937")
+        border = c.get("border", "#4b5563")
+        shadow = c.get("shadow", "#030712")
         return (
             f"QFrame#HelpPanel {{"
             f"  background-color: {bg};"
@@ -145,7 +117,6 @@ class HelpTab(QWidget):
             f"  border-bottom: 2px solid {shadow};"
             f"  border-radius: 12px;"
             f"}}"
-            # Keep border identical on hover so it never flashes blue
             f"QFrame#HelpPanel:hover {{"
             f"  border: 1px solid {border};"
             f"  border-bottom: 2px solid {shadow};"
@@ -153,11 +124,9 @@ class HelpTab(QWidget):
         )
 
     def _divider_style(self) -> str:
-        """Return inline CSS for a thin horizontal rule QFrame divider."""
         return f"border: none; border-top: 1px solid {self._colors.get('border', '#374151')};"
 
     def _desc_style(self) -> str:
-        """Body text for shortcut descriptions and accessibility items — full text colour."""
         return (
             f"font-size: 13px;"
             f"color: {self._colors.get('text', '#f9fafb')};"
@@ -165,7 +134,6 @@ class HelpTab(QWidget):
         )
 
     def _plus_style(self) -> str:
-        """The '+' separator between key badges."""
         return (
             f"font-size: 12px; font-weight: 700;"
             f"color: {self._colors.get('text_muted', '#9ca3af')};"
@@ -173,39 +141,36 @@ class HelpTab(QWidget):
         )
 
     def _set_text_label(self, lbl: QLabel, fmt: str) -> None:
-        """Apply *fmt* (must contain ``{color}``) and register for theme refresh."""
         lbl.setStyleSheet(fmt.format(color=self._colors.get("text", "#f9fafb")))
         self._text_labels.append((lbl, fmt))
 
     def _section_title_style(self) -> str:
-        """Bold uppercase section header style.
-
-        Uses white text on dark backgrounds and black on light backgrounds so
-        the category label stands out clearly against both themes.
-        """
-        # Compare against the dark palette's bg value to infer the current theme.
         section_color = "#ffffff" if self._colors.get("bg", "").lower() == CATPPUCCIN_DARK.get("bg", "").lower() else "#000000"
         return (
-            "font-size: 13px; font-weight: 800; letter-spacing: 0;"
+            "font-size: 13px; font-weight: 800; letter-spacing: 1.3px;"
             f"color: {section_color};"
         )
 
-    # ──────────────────────────────────────────────────────────────────
-    # Root layout
-    # ──────────────────────────────────────────────────────────────────
+    @staticmethod
+    def _detect_platform_name() -> str:
+        if sys.platform == "darwin":
+            return "macOS"
+        if sys.platform.startswith("win"):
+            return "Windows"
+        if sys.platform.startswith("linux"):
+            return "Linux"
+        return "Unknown"
+
     def _setup_ui(self) -> None:
-        """Construct the Help tab stack with overview and statement pages."""
         _outer = QVBoxLayout(self)
         _outer.setContentsMargins(0, 0, 0, 0)
         _outer.setSpacing(0)
 
         self._main_stack = QStackedWidget()
         self._main_stack.addWidget(self._build_help_center_page())
-        self._main_stack.addWidget(self._build_accessibility_page())
         _outer.addWidget(self._main_stack)
 
     def _build_help_center_page(self) -> QWidget:
-        """Build the main Help Center overview page."""
         page = QWidget()
         _outer = QVBoxLayout(page)
         _outer.setContentsMargins(0, 0, 0, 0)
@@ -224,96 +189,44 @@ class HelpTab(QWidget):
         body = QHBoxLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(14)
-        body.addWidget(self._build_shortcuts_panel(), 3)
-        body.addWidget(self._build_right_panel(), 2)
+        body.addWidget(self._build_shortcuts_panel(), 5)
+        body.addWidget(self._build_right_panel(), 3)
 
         root.addLayout(body, 1)
         return page
 
-    def _build_accessibility_page(self) -> QWidget:
-        """Build the embedded accessibility statement page."""
-        page = QWidget()
-        root = QVBoxLayout(page)
-        root.setContentsMargins(20, 20, 20, 20)
-        root.setSpacing(16)
-
-        header_row = QHBoxLayout()
-        header_row.setContentsMargins(0, 0, 0, 0)
-        self.btn_accessibility_back = QPushButton("← Back to Help")
-        self.btn_accessibility_back.setProperty("class", "SecondaryButton")
-        self.btn_accessibility_back.setFixedHeight(36)
-        self.btn_accessibility_back.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_accessibility_back.clicked.connect(self.show_help_overview)
-        header_row.addWidget(self.btn_accessibility_back)
-        header_row.addStretch()
-        root.addLayout(header_row)
-
-        sub = QLabel(
-            "Read the full accessibility statement, including keyboard support, "
-            "current coverage, and recommended validation steps for each release."
-        )
-        sub.setProperty("class", "HelperText")
-        sub.setWordWrap(True)
-        self._desc_labels.append(sub)
-        root.addWidget(sub)
-
-        frame = QFrame()
-        frame.setObjectName("HelpPanel")
-        frame.setStyleSheet(self._panel_style())
-        frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self._panel_frames.append(frame)
-        frame_layout = QVBoxLayout(frame)
-        frame_layout.setContentsMargins(26, 22, 26, 22)
-        frame_layout.setSpacing(12)
-
-        heading = QLabel("Accessibility Statement")
-        self._set_text_label(heading, "font-size: 18px; font-weight: 800; color: {color};")
-        frame_layout.addWidget(heading)
-
-        helper = QLabel("Links inside this statement open in your default browser.")
-        helper.setProperty("class", "HelperText")
-        helper.setWordWrap(True)
-        self._desc_labels.append(helper)
-        frame_layout.addWidget(helper)
-
-        self.accessibility_viewer = QTextBrowser()
-        self.accessibility_viewer.setReadOnly(True)
-        self.accessibility_viewer.setOpenExternalLinks(True)
-        self.accessibility_viewer.setFrameShape(QFrame.Shape.NoFrame)
-        self.accessibility_viewer.setStyleSheet(
-            "QTextBrowser { background: transparent; border: none; padding: 4px 0; font-size: 13px; }"
-        )
-        self.accessibility_viewer.setMarkdown(load_accessibility_statement())
-        frame_layout.addWidget(self.accessibility_viewer, stretch=1)
-
-        root.addWidget(frame, stretch=1)
-        return page
-
     def show_accessibility_page(self) -> None:
-        """Switch to the embedded accessibility statement page."""
-        self.accessibility_viewer.setMarkdown(load_accessibility_statement())
-        self._main_stack.setCurrentIndex(1)
-        self.page_title_changed.emit("Accessibility Statement")
+        """Open the repository-hosted accessibility statement in the browser."""
+        self._open_help_link(ACCESSIBILITY_STATEMENT_URL, "Accessibility Statement")
 
     def show_help_overview(self) -> None:
-        """Return to the main Help Center overview page."""
         self._main_stack.setCurrentIndex(0)
         self.page_title_changed.emit("Help")
 
     def current_page_title(self) -> str:
-        """Return the title that matches the currently visible Help sub-page."""
-        return "Accessibility Statement" if self._main_stack.currentIndex() == 1 else "Help"
+        return "Help"
 
-    # ──────────────────────────────────────────────────────────────────
-    # Header
-    # ──────────────────────────────────────────────────────────────────
+    def _open_help_link(self, target: str, label: str) -> bool:
+        resolved = resolve_help_link_target(target)
+        if resolved is None:
+            QMessageBox.warning(
+                self,
+                "Link Not Available",
+                f"Could not find the configured {label.lower()} target:\n{target}",
+            )
+            return False
+
+        url = QUrl.fromLocalFile(str(resolved)) if not isinstance(resolved, str) else QUrl(resolved)
+        if not QDesktopServices.openUrl(url):
+            QMessageBox.warning(
+                self,
+                "Open Failed",
+                f"Could not open the configured {label.lower()} target:\n{target}",
+            )
+            return False
+        return True
+
     def _build_header(self) -> QFrame:
-        """Build the slim header bar with the app title and a document icon.
-
-        Returns:
-            A ``QFrame`` styled with the ``Card`` class so the global QSS
-            gives it a surface background and border.
-        """
         frame = QFrame()
         frame.setObjectName("HelpHeader")
         c = self._colors
@@ -346,106 +259,85 @@ class HelpTab(QWidget):
             "font-size: 15px; font-weight: 800; letter-spacing: 0.2px; color: {color};"
         )
         lay.addWidget(title)
-
         lay.addStretch()
 
         self._help_header_frame = frame
         return frame
 
-    # ──────────────────────────────────────────────────────────────────
-    # Left panel – Keyboard shortcuts
-    # ──────────────────────────────────────────────────────────────────
     def _build_shortcuts_panel(self) -> QFrame:
-        """Build the left panel containing categorised keyboard shortcut rows.
-
-        Each category from ``_shortcut_sections`` gets a bold section label
-        (registered in ``_section_labels``) followed by a horizontal divider
-        (registered in ``_dividers``) and then one ``_build_shortcut_row`` per
-        shortcut entry.
-
-        Returns:
-            A ``QFrame`` with ``objectName="HelpPanel"`` and an expanding
-            size policy.  It is registered in ``_panel_frames`` so
-            ``refresh_theme`` can update its inline stylesheet.
-        """
         frame = QFrame()
         frame.setObjectName("HelpPanel")
         frame.setStyleSheet(self._panel_style())
         frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._panel_frames.append(frame)
         lay = QVBoxLayout(frame)
-        lay.setContentsMargins(26, 22, 26, 22)
+        lay.setContentsMargins(28, 24, 28, 24)
         lay.setSpacing(0)
 
-        # Panel heading
         heading_row = QHBoxLayout()
         heading_row.setSpacing(9)
         h_icon = QLabel()
-        h_icon.setPixmap(get_pixmap(SVG_SETTINGS, "#3b82f6", 18))
-        h_icon.setFixedSize(20, 20)
+        h_icon.setPixmap(get_pixmap(SVG_SETTINGS, "#3b82f6", 15))
+        h_icon.setFixedSize(17, 17)
         heading_row.addWidget(h_icon)
         heading_lbl = QLabel("Keyboard Shortcuts")
-        self._set_text_label(heading_lbl, "font-size: 16px; font-weight: 800; color: {color};")
+        self._set_text_label(heading_lbl, "font-size: 15px; font-weight: 800; color: {color};")
         heading_row.addWidget(heading_lbl)
         heading_row.addStretch()
         lay.addLayout(heading_row)
-        lay.addSpacing(14)
+        lay.addSpacing(20)
 
-        for category, items in self._shortcut_sections():
-            # Section label + divider
-            cat_row = QHBoxLayout()
-            cat_row.setSpacing(10)
-            cat_row.setContentsMargins(0, 6, 0, 5)
-            cat_lbl = QLabel(category.upper())
-            cat_lbl.setStyleSheet(self._section_title_style())
-            self._section_labels.append(cat_lbl)
-            cat_lbl.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
-            cat_row.addWidget(cat_lbl)
-            div = QFrame()
-            div.setFrameShape(QFrame.Shape.HLine)
-            div.setStyleSheet(self._divider_style())
-            self._dividers.append(div)
-            cat_row.addWidget(div, 1)
-            lay.addLayout(cat_row)
-
-            for keys, description in items:
-                lay.addWidget(self._build_shortcut_row(keys, description))
-                lay.addSpacing(5)
-
-            lay.addSpacing(5)
-
-        lay.addStretch()
+        sections = self._shortcut_sections()
+        for index, (category, items) in enumerate(sections):
+            lay.addWidget(self._build_shortcut_section(category, items))
+            if index < len(sections) - 1:
+                lay.addStretch(1)
         return frame
 
-    def _build_shortcut_row(self, keys: str, description: str) -> QWidget:
-        """Build a single shortcut row widget containing KBD badges and a description.
-
-        Each key component of *keys* (split on ``+``) becomes an independent
-        badge label with ``_kbd_style``.  A ``+`` separator label is inserted
-        between components and registered in ``_plus_labels`` for theme refresh.
-
-        Args:
-            keys: Key-sequence string (e.g. ``"Ctrl+H"`` or ``"Esc"``).
-            description: Human-readable description of the shortcut's action.
-
-        Returns:
-            A transparent ``QWidget`` containing the badge row (fixed 165 px
-            wide) on the left and the description label on the right.
-        """
+    def _build_shortcut_section(self, category: str, items: list[tuple[str, str]]) -> QWidget:
         widget = QWidget()
         widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        widget.setMinimumHeight(32)
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        cat_row = QHBoxLayout()
+        cat_row.setSpacing(10)
+        cat_row.setContentsMargins(0, 4, 0, 10)
+        cat_lbl = QLabel(category.upper())
+        cat_lbl.setStyleSheet(self._section_title_style())
+        self._section_labels.append(cat_lbl)
+        cat_lbl.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+        cat_row.addWidget(cat_lbl)
+
+        div = QFrame()
+        div.setFrameShape(QFrame.Shape.HLine)
+        div.setStyleSheet(self._divider_style())
+        self._dividers.append(div)
+        cat_row.addWidget(div, 1)
+        layout.addLayout(cat_row)
+
+        for row_index, (keys, description) in enumerate(items):
+            layout.addWidget(self._build_shortcut_row(keys, description))
+            if row_index < len(items) - 1:
+                layout.addSpacing(12)
+
+        return widget
+
+    def _build_shortcut_row(self, keys: str, description: str) -> QWidget:
+        widget = QWidget()
+        widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        widget.setMinimumHeight(40)
         row = QHBoxLayout(widget)
         row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(14)
+        row.setSpacing(18)
 
-        # KBD badge row.  An initial stretch pushes all badges toward the right
-        # edge of their fixed-width container so single-key shortcuts like "Esc"
-        # align with the last key of two-part shortcuts like "Ctrl+B".
         badge_box = QHBoxLayout()
-        badge_box.setSpacing(6)
+        badge_box.setSpacing(8)
         badge_box.setContentsMargins(0, 0, 0, 0)
-        badge_box.addStretch(1)  # right-aligns the badge(s) within badge_wrapper
+        badge_box.addStretch(1)
 
         parts = [p.strip() for p in keys.split("+")]
         for i, part in enumerate(parts):
@@ -465,43 +357,27 @@ class HelpTab(QWidget):
         badge_wrapper = QWidget()
         badge_wrapper.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         badge_wrapper.setLayout(badge_box)
-        # Fixed width ensures the description column starts at a consistent
-        # horizontal position regardless of how many keys are in the shortcut.
-        badge_wrapper.setFixedWidth(180)
+        badge_wrapper.setFixedWidth(188)
         row.addWidget(badge_wrapper, 0, Qt.AlignmentFlag.AlignVCenter)
 
         desc = QLabel(description)
         desc.setStyleSheet(self._desc_style())
         self._desc_labels.append(desc)
+        desc.setWordWrap(True)
         row.addWidget(desc, 1)
 
         return widget
 
-    # ──────────────────────────────────────────────────────────────────
-    # Right panel – Accessibility + About
-    # ──────────────────────────────────────────────────────────────────
     def _build_right_panel(self) -> QFrame:
-        """Build the right panel containing the accessibility feature list and About info.
-
-        The panel has two sections separated by a divider:
-        - Accessibility — a bulleted feature list and a button that opens the
-          embedded accessibility statement page.
-        - About — version, organisation, and platform metadata rows.
-
-        Returns:
-            A ``QFrame`` with ``objectName="HelpPanel"`` registered in
-            ``_panel_frames``.
-        """
         frame = QFrame()
         frame.setObjectName("HelpPanel")
         frame.setStyleSheet(self._panel_style())
-        frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         self._panel_frames.append(frame)
         lay = QVBoxLayout(frame)
         lay.setContentsMargins(26, 22, 26, 22)
         lay.setSpacing(0)
 
-        # ── Accessibility heading ──────────────────────────────────────
         acc_heading = QHBoxLayout()
         acc_heading.setSpacing(9)
         a_icon = QLabel()
@@ -520,7 +396,7 @@ class HelpTab(QWidget):
             "Readable contrast and clear status colours",
             "Live progress and actionable error feedback",
             "Consistent behaviour in light and dark mode",
-            "Full accessibility statement available in-app",
+            "Full accessibility statement available in the repository",
         ]
         for text in features:
             feat_row = QHBoxLayout()
@@ -551,7 +427,60 @@ class HelpTab(QWidget):
 
         lay.addSpacing(18)
 
-        # Thin divider
+        support_div = QFrame()
+        support_div.setFrameShape(QFrame.Shape.HLine)
+        support_div.setStyleSheet(self._divider_style())
+        self._dividers.append(support_div)
+        lay.addWidget(support_div)
+
+        lay.addSpacing(18)
+
+        support_heading = QHBoxLayout()
+        support_heading.setSpacing(9)
+        s_icon = QLabel()
+        s_icon.setPixmap(get_pixmap(SVG_RESULTS, "#3b82f6", 15))
+        s_icon.setFixedSize(17, 17)
+        support_heading.addWidget(s_icon)
+        support_lbl = QLabel("Support and Guidance")
+        self._set_text_label(support_lbl, "font-size: 13px; font-weight: 800; color: {color};")
+        support_heading.addWidget(support_lbl)
+        support_heading.addStretch()
+        lay.addLayout(support_heading)
+
+        lay.addSpacing(14)
+
+        support_helper = QLabel(
+            "Documentation to support users and guide them through the application."
+        )
+        support_helper.setProperty("class", "HelperText")
+        support_helper.setWordWrap(True)
+        self._desc_labels.append(support_helper)
+        lay.addWidget(support_helper)
+
+        lay.addSpacing(12)
+
+        docs_btn = QPushButton("Open Support and Guidance →")
+        docs_btn.setProperty("class", "SecondaryButton")
+        docs_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        docs_btn.setFixedHeight(36)
+        docs_btn.clicked.connect(
+            lambda: self._open_help_link(SUPPORT_GUIDANCE_URL, "Support and Guidance")
+        )
+        self.btn_support_guidance = docs_btn
+        lay.addWidget(docs_btn)
+
+        lay.addSpacing(8)
+
+        guide_btn = QPushButton("Open User Guide  →")
+        guide_btn.setProperty("class", "PrimaryButton")
+        guide_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        guide_btn.setFixedHeight(36)
+        guide_btn.clicked.connect(lambda: self._open_help_link(USER_GUIDE_URL, "User Guide"))
+        self.btn_user_guide = guide_btn
+        lay.addWidget(guide_btn)
+
+        lay.addSpacing(18)
+
         mid_div = QFrame()
         mid_div.setFrameShape(QFrame.Shape.HLine)
         mid_div.setStyleSheet(self._divider_style())
@@ -560,7 +489,6 @@ class HelpTab(QWidget):
 
         lay.addSpacing(18)
 
-        # ── About heading ──────────────────────────────────────────────
         about_heading = QHBoxLayout()
         about_heading.setSpacing(9)
         ab_icon = QLabel()
@@ -575,15 +503,9 @@ class HelpTab(QWidget):
 
         lay.addSpacing(14)
 
-        if sys.platform == "darwin":
-            platform_name = "macOS"
-        elif sys.platform == "win32":
-            platform_name = "Windows"
-        else:
-            platform_name = "Linux"
         about_rows = [
-            ("Version",  "1.0.0"),
-            ("Platform", platform_name),
+            ("Version", "1.0.0"),
+            ("Platform", self.platform_name),
         ]
         for key, val in about_rows:
             info_row = QHBoxLayout()
@@ -600,23 +522,11 @@ class HelpTab(QWidget):
             lay.addLayout(info_row)
             lay.addSpacing(7)
 
-        lay.addStretch()
         return frame
 
-    # ──────────────────────────────────────────────────────────────────
-    # Data
-    # ──────────────────────────────────────────────────────────────────
     def _shortcut_sections(self):
-        """Return the structured shortcut data used to populate the shortcuts panel.
-
-        Uses the full "Control" modifier label on macOS (matching system
-        convention) and the abbreviated "Ctrl" on Windows/Linux.
-
-        Returns:
-            A list of ``(category_name, [(keys_str, description), ...])`` tuples.
-        """
-        # macOS displays the full word "Control" in menu bar shortcuts.
-        mod = "Control" if self.platform == "mac" else "Ctrl"
+        """Return the structured shortcut data used to populate the shortcuts panel."""
+        mod = "Control" if self.platform_name == "macOS" else "Ctrl"
         return [
             ("General", [
                 (f"{mod}+B", "Toggle sidebar collapse"),
@@ -631,7 +541,7 @@ class HelpTab(QWidget):
             ]),
             ("Harvest Controls", [
                 (f"{mod}+H", "Start harvest"),
-                ("Esc",       "Stop harvest"),
+                ("Esc", "Stop harvest"),
                 (f"{mod}+.", "Cancel harvest"),
             ]),
         ]

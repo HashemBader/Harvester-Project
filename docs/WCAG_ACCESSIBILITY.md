@@ -16,7 +16,7 @@ This application includes accessibility improvements aimed at WCAG 2.1 AA-style 
   - Major controls use accessible names and descriptions so screen readers can announce intent.
 - Discoverability:
   - A shortcuts dialog is available and searchable.
-  - The dialog detects macOS vs Windows/Linux and shows the right modifier key labels.
+  - The dialog detects macOS, Windows, and Linux and shows the right modifier key labels.
 - Readability:
   - Key status and helper labels use stronger contrast and simpler wording.
 

@@ -82,9 +82,20 @@ class ShortcutsDialog(QDialog):
         self.setWindowTitle("Keyboard Shortcuts Reference")
         self.setMinimumSize(640, 520)
         # Detect platform once so _get_shortcuts_data and _macify use it consistently.
-        self.platform = "mac" if sys.platform == "darwin" else "win_linux"
+        self.platform = self._detect_platform_name()
         self._setup_ui()
         self._apply_theme()
+
+    @staticmethod
+    def _detect_platform_name() -> str:
+        """Return a user-facing operating-system label."""
+        if sys.platform == "darwin":
+            return "macOS"
+        if sys.platform.startswith("win"):
+            return "Windows"
+        if sys.platform.startswith("linux"):
+            return "Linux"
+        return "Unknown"
 
     def _apply_theme(self):
         """Apply the current theme stylesheet including the CategoryHeader override.
@@ -135,8 +146,7 @@ class ShortcutsDialog(QDialog):
 
         platform_row = QHBoxLayout()
         platform_row.addStretch()
-        platform_name = "macOS" if self.platform == "mac" else "Windows/Linux"
-        platform_label = QLabel(f"Auto-detected platform: {platform_name}")
+        platform_label = QLabel(f"Auto-detected platform: {self.platform}")
         platform_label.setStyleSheet("color: #a7a59b; font-size: 12px;")
         platform_row.addWidget(platform_label)
         platform_row.addStretch()
@@ -275,7 +285,7 @@ class ShortcutsDialog(QDialog):
             ]),
         ]
 
-        if self.platform == "mac":
+        if self.platform == "macOS":
             return [(cat, [(self._macify(keys), desc) for keys, desc in shortcuts])
                     for cat, shortcuts in shortcuts_data]
 

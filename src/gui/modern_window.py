@@ -292,7 +292,7 @@ class ModernMainWindow(QMainWindow):
 
         Shortcuts are stored in ``self._shortcuts`` so they are not garbage-collected
         (Qt shortcuts are only active while the owning Python object is alive).
-        The modifier prefix is ``Ctrl`` on Windows/Linux and ``Meta`` on macOS so
+        The modifier prefix is ``Ctrl`` on Windows and Linux and ``Meta`` on macOS so
         that shortcuts bind to the physical Control key on every platform.
         """
         mod = self._shortcut_modifier

@@ -138,24 +138,40 @@ class TestTabSwitching:
         assert main_window.stack.currentIndex() == 3
         assert main_window.page_title.text() == "Help"
 
-    def test_accessibility_statement_opens_as_help_subpage(self, main_window, qapp):
-        """The Help page should open the accessibility statement in-tab, not as a dialog."""
+    def test_accessibility_statement_opens_in_browser_from_help(self, main_window, qapp, monkeypatch):
+        """The Help page should open the repository-hosted accessibility statement in the browser."""
+        opened = {}
+
+        def fake_open_url(url):
+            opened["url"] = url.toString()
+            return True
+
+        monkeypatch.setattr("gui.help_tab.ACCESSIBILITY_STATEMENT_URL", "repo:docs/wcag.md")
+        monkeypatch.setattr(
+            "gui.help_tab.resolve_help_link_target",
+            lambda _target: "https://github.com/example/fork/blob/main/docs/wcag.md",
+        )
+        monkeypatch.setattr("gui.help_tab.QDesktopServices.openUrl", fake_open_url)
+
         main_window.btn_help.click()
         main_window.help_tab.btn_view_accessibility_statement.click()
         qapp.processEvents()
 
         assert main_window.stack.currentIndex() == 3
-        assert main_window.help_tab._main_stack.currentIndex() == 1
-        assert main_window.page_title.text() == "Accessibility Statement"
-        assert "WCAG Accessibility Notes" in main_window.help_tab.accessibility_viewer.toPlainText()
+        assert main_window.help_tab._main_stack.currentIndex() == 0
+        assert main_window.page_title.text() == "Help"
+        assert opened["url"] == "https://github.com/example/fork/blob/main/docs/wcag.md"
 
-    def test_accessibility_statement_back_returns_to_help(self, main_window, qapp):
-        """The embedded accessibility page should return to the Help overview."""
+    def test_show_accessibility_page_keeps_help_title(self, main_window, qapp, monkeypatch):
+        """Opening the accessibility statement should keep the user on the Help page."""
+        monkeypatch.setattr(
+            "gui.help_tab.resolve_help_link_target",
+            lambda _target: "https://github.com/example/fork/blob/main/docs/wcag.md",
+        )
+        monkeypatch.setattr("gui.help_tab.QDesktopServices.openUrl", lambda _url: True)
+
         main_window.btn_help.click()
         main_window.help_tab.show_accessibility_page()
-        qapp.processEvents()
-
-        main_window.help_tab.btn_accessibility_back.click()
         qapp.processEvents()
 
         assert main_window.help_tab._main_stack.currentIndex() == 0

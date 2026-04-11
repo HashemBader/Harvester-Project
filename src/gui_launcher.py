@@ -98,7 +98,7 @@ def main():
     # Application metadata is used by Qt for OS-level window/taskbar labels,
     # QSettings storage paths, and About dialogs.
     app.setApplicationName("LCCN Harvester")
-    app.setOrganizationName("UPEI Library")
+    app.setOrganizationName("LCCN Harvester")
     app.setApplicationVersion("1.0.0")
 
     # Create and show the main application window.
