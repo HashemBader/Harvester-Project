@@ -10,7 +10,9 @@ Provides ``ConsistentComboBox``, a ``QComboBox`` subclass that:
 * Normalises popup width so short combo boxes never show a truncated list.
 """
 
+# Import Qt core features such as focus policies and widget attributes
 from PyQt6.QtCore import Qt
+# Import required widgets: base combo box, list view for popup, and frame styling
 from PyQt6.QtWidgets import QComboBox, QListView, QFrame
 
 
@@ -29,6 +31,7 @@ class ConsistentComboBox(QComboBox):
             rule in the application stylesheet.
     """
 
+    # Default object name used to match QSS styling rules
     DEFAULT_POPUP_OBJECT_NAME = "ComboPopup"
 
     def __init__(
@@ -48,27 +51,44 @@ class ConsistentComboBox(QComboBox):
             max_visible_items: Maximum number of items shown before the popup
                 scrolls.  ``None`` leaves the Qt default (10) unchanged.
         """
+        # Call the parent QComboBox constructor
         super().__init__(parent)
+
+        # Ensure the widget can receive strong focus (keyboard + mouse)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+
         # Prevent the user from accidentally inserting new items by typing.
         self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
 
         # Replace the native popup with a custom QListView so the application
         # stylesheet can style it uniformly across platforms.
         popup_view = QListView(self)
-        popup_view.setUniformItemSizes(True)     # row height optimisation
+
+        # Enable uniform item sizes for better rendering performance
+        popup_view.setUniformItemSizes(True)
+
+        # Remove the default frame/border around the popup
         popup_view.setFrameShape(QFrame.Shape.NoFrame)
+
         # WA_StyledBackground lets the stylesheet paint the QListView background.
         popup_view.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
+        # Disable horizontal scrollbar to avoid visual clutter
         popup_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
         # objectName is the QSS selector (e.g. QListView#RankComboPopup).
         popup_view.setObjectName(popup_object_name or self.DEFAULT_POPUP_OBJECT_NAME)
+
+        # Apply this custom view as the dropdown popup
         self.setView(popup_view)
 
+        # Optionally limit how many items are visible before scrolling is required
         if max_visible_items is not None:
             try:
+                # Ensure value is at least 1 and convert to integer
                 self.setMaxVisibleItems(max(1, int(max_visible_items)))
             except Exception:
+                # Fallback to default if conversion fails
                 self.setMaxVisibleItems(10)
 
     def showPopup(self):
@@ -84,12 +104,15 @@ class ConsistentComboBox(QComboBox):
         that does not support a particular call never prevents the popup from
         opening.
         """
+        # Get the currently assigned popup view (QListView)
         popup_view = self.view()
+
         if popup_view is not None:
             try:
                 # Width required to display the longest item text in column 0.
                 content_width = popup_view.sizeHintForColumn(0)
             except Exception:
+                # If not supported, fallback to invalid width
                 content_width = -1
 
             scrollbar_width = 0
@@ -97,6 +120,7 @@ class ConsistentComboBox(QComboBox):
                 # Reserve space for the vertical scrollbar if it will appear.
                 scrollbar_width = popup_view.verticalScrollBar().sizeHint().width()
             except Exception:
+                # If scrollbar not available, ignore
                 scrollbar_width = 0
 
             frame_width = 0
@@ -104,17 +128,25 @@ class ConsistentComboBox(QComboBox):
                 # Account for the popup view's frame border on both sides.
                 frame_width = popup_view.frameWidth() * 2
             except Exception:
+                # If frame info unavailable, ignore
                 frame_width = 0
 
             # 28 px of extra padding prevents text from touching the edges.
+            # Ensure popup is at least as wide as the combo box itself
             desired_width = max(self.width(), content_width + scrollbar_width + frame_width + 28)
+
+            # Apply the calculated minimum width to the popup
             popup_view.setMinimumWidth(desired_width)
 
+        # Call the default Qt implementation to actually show the popup
         super().showPopup()
 
     def wheelEvent(self, event):
         """Ignore wheel changes unless the combo box already has focus."""
+        # Only allow scroll-wheel changes if the widget currently has focus
         if self.hasFocus():
             super().wheelEvent(event)
             return
+
+        # Otherwise ignore the event to prevent accidental value changes
         event.ignore()
