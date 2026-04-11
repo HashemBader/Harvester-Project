@@ -66,7 +66,7 @@ class ApiClientTarget(HarvestTarget):
             )
 
         # A "success" status with no call numbers is treated as not-found.
-        msg = r.error_message or r.status
+        msg = r.error_message or ("No records found" if r.status == "not_found" else r.status)
         return TargetResult(
             success=False,
             source=r.source,

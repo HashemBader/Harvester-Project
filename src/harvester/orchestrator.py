@@ -59,6 +59,8 @@ def _friendly_target_error(raw: str) -> str:
     e = (raw or "").strip().lower()
     if not e:
         return "Unknown error"
+    if e == "not_found":
+        return "No records found"
     # Z39.50 connection problems
     if "graceful close" in e:
         return "Server unavailable (connection closed by remote server)"
@@ -80,7 +82,7 @@ def _friendly_target_error(raw: str) -> str:
         return "Network error"
     # Record-level issues — keep these as-is (already user-friendly)
     if e.startswith("no records found"):
-        return raw.strip()
+        return "No records found"
     if "no lccn" in e or "no call number" in e or "no 050" in e or "no 060" in e:
         return raw.strip()
     if "record found but" in e:
@@ -687,7 +689,7 @@ class HarvestOrchestrator:
             last_error = _friendly_target_error(result.error or "")
             err = (result.error or "").strip()
             friendly_err = _friendly_target_error(err)
-            if err.lower().startswith("no records found in"):
+            if err.lower().startswith("no records found"):
                 not_found_targets.append(last_target)
             elif err:
                 other_errors.append((last_target, friendly_err))
@@ -784,12 +786,10 @@ class HarvestOrchestrator:
             return ProcessOutcome("skip_retry", None, tuple())
 
         if not_found_targets and not other_errors:
-            last_error = "Not found in: " + ", ".join(not_found_targets)
+            last_error = "No records found"
         elif not_found_targets and other_errors:
             last_error = (
-                "Not found in: "
-                + ", ".join(not_found_targets)
-                + " | Other errors: "
+                "Other errors: "
                 + " ; ".join(f"{t}: {e}" for t, e in other_errors)
             )
         elif other_errors:
@@ -1212,7 +1212,7 @@ class HarvestOrchestrator:
                     last_error = _friendly_target_error(result.error or "")
                     err = (result.error or "").strip()
                     friendly_err = _friendly_target_error(err)
-                    if err.lower().startswith("no records found in"):
+                    if err.lower().startswith("no records found"):
                         not_found_targets.append(last_target)
                     elif err:
                         other_errors.append((last_target, friendly_err))
@@ -1291,12 +1291,10 @@ class HarvestOrchestrator:
                     return ("skip_retry", [], [], [])
 
                 if not_found_targets and not other_errors:
-                    last_error = "Not found in: " + ", ".join(not_found_targets)
+                    last_error = "No records found"
                 elif not_found_targets and other_errors:
                     last_error = (
-                        "Not found in: "
-                        + ", ".join(not_found_targets)
-                        + " | Other errors: "
+                        "Other errors: "
                         + " ; ".join(f"{t}: {e}" for t, e in other_errors)
                     )
                 elif other_errors:
