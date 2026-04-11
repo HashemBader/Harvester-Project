@@ -1950,44 +1950,79 @@ class HarvestTab(QWidget):
                 digest.update(chunk)
         return digest.hexdigest()
 
-    def _resolve_marc_source_conflict(self, db_path: str, source_name: str, path: str, file_hash: str) -> bool | None:
-        """Return replacement intent for a MARC source name, or ``None`` to abort.
+    def _resolve_marc_source_conflict(
+        self,
+        db_path: str,
+        source_name: str,
+        parsed_records: list,
+    ) -> tuple[bool | None, list]:
+        """Check for ISBN overlap between the new file and existing DB records.
 
-        The source name is a free label and is not tied to any specific file —
-        multiple MARC files may be imported under the same name.  The only prompt
-        shown is when the exact same file (matching hash) is imported again.
+        Compares ISBNs inside the new file against ISBNs already stored under
+        *source_name* in the database.  Returns a ``(replace_existing, records)``
+        tuple where *replace_existing* is ``None`` to abort, ``True`` to replace
+        the existing source, or ``False`` to insert; and *records* is the
+        (possibly filtered) list to persist.
         """
-        db = DatabaseManager(db_path)
-        existing = db.get_marc_import(source_name)
-        if existing is None:
-            return False
+        import sqlite3 as _sqlite3
 
-        existing_hash = (existing["file_hash"] or "").strip()
-        current_name = Path(path).name
+        # Collect ISBNs from the new file's parsed records.
+        new_isbns: set[str] = set()
+        for r in parsed_records:
+            for isbn in r.isbns:
+                clean = isbn.replace("-", "").strip()
+                if clean:
+                    new_isbns.add(clean)
 
-        # Different file — just insert without asking; source name is only a label.
-        if existing_hash != file_hash:
-            return False
+        if not new_isbns:
+            return False, parsed_records
 
-        # Same file imported again — ask whether to replace or insert again.
+        # Query existing ISBNs stored under this source name.
+        try:
+            conn = _sqlite3.connect(db_path)
+            rows = conn.execute(
+                "SELECT DISTINCT isbn FROM main WHERE source = ?", (source_name,)
+            ).fetchall()
+            conn.close()
+            existing_isbns: set[str] = {r[0].replace("-", "").strip() for r in rows if r[0]}
+        except Exception:
+            return False, parsed_records
+
+        if not existing_isbns:
+            return False, parsed_records
+
+        overlap = new_isbns & existing_isbns
+        new_only = new_isbns - existing_isbns
+
+        if not overlap:
+            # All ISBNs from this file are new — import silently.
+            return False, parsed_records
+
+        # Some ISBNs already exist under this source name — ask the user.
         dialog = QMessageBox(self)
-        dialog.setWindowTitle("File Already Imported")
+        dialog.setWindowTitle("Duplicate ISBNs Found")
         dialog.setIcon(QMessageBox.Icon.Question)
         dialog.setText(
-            f"'{current_name}' was already imported under '{source_name}'.\n\n"
-            f"Insert to add its records again, or Replace to remove the previous import first."
+            f"{len(overlap)} ISBN(s) from this file are already imported under '{source_name}'.\n"
+            f"{len(new_only)} ISBN(s) are new.\n\n"
+            f"Import only the new ones, import all records, or cancel?"
         )
-        replace_button = dialog.addButton("Replace", QMessageBox.ButtonRole.AcceptRole)
-        insert_button = dialog.addButton("Insert", QMessageBox.ButtonRole.ActionRole)
+        new_only_btn = dialog.addButton("Import New Only", QMessageBox.ButtonRole.AcceptRole)
+        all_btn = dialog.addButton("Import All", QMessageBox.ButtonRole.ActionRole)
         dialog.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
-        dialog.setDefaultButton(replace_button)
+        dialog.setDefaultButton(new_only_btn)
         dialog.exec()
+
         clicked = dialog.clickedButton()
-        if clicked == replace_button:
-            return True
-        if clicked == insert_button:
-            return False
-        return None
+        if clicked == new_only_btn:
+            filtered = [
+                r for r in parsed_records
+                if any(isbn.replace("-", "").strip() in new_only for isbn in r.isbns)
+            ]
+            return False, filtered
+        if clicked == all_btn:
+            return False, parsed_records
+        return None, parsed_records
 
     def _import_marc_file(self):
         """Run the three-step MARC import pipeline for the currently selected file.
@@ -2263,10 +2298,12 @@ class HarvestTab(QWidget):
                 pass
 
         source_file_hash = self._compute_file_hash(path)
-        replace_existing_source = self._resolve_marc_source_conflict(db_path, source_name, path, source_file_hash)
+        replace_existing_source, parsed_records = self._resolve_marc_source_conflict(
+            db_path, source_name, parsed_records
+        )
         if replace_existing_source is None:
             self._btn_import_marc.setEnabled(True)
-            self._marc_hint_label.setText("Import cancelled. Choose a different source name.")
+            self._marc_hint_label.setText("Import cancelled.")
             return
 
         marc_service = MarcImportService(
