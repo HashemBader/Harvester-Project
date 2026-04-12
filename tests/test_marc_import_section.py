@@ -97,6 +97,12 @@ class TestMarcImportWidgetsExist:
         """Clear button must be hidden when no file is selected."""
         assert not harvest_tab._btn_clear_marc.isVisible()
 
+    def test_marc_progress_bar_is_local_and_initially_hidden(self, harvest_tab):
+        """MARC import has its own local progress bar inside the drop zone."""
+        assert hasattr(harvest_tab, "_marc_progress_bar")
+        assert not harvest_tab._marc_progress_bar.isVisible()
+        assert harvest_tab._marc_progress_bar.value() == 0
+
 
 class TestMarcHandlerMethods:
     """Test that handler methods are implemented correctly."""
