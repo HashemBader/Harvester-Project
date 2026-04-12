@@ -35,6 +35,7 @@ import xml.etree.ElementTree as ET
 from src.config.profile_manager import ProfileManager
 from src.database.db_manager import DatabaseManager, MainRecord, now_datetime_str, normalize_to_yyyymmdd_int
 from src.utils.isbn_validator import pick_lowest_isbn
+from src.utils.call_number_validators import validate_call_numbers
 from src.utils.marc_parser import (
     extract_call_numbers_from_json,
     extract_call_numbers_from_xml,
@@ -255,19 +256,20 @@ class MarcImportService:
                     continue
 
                 record_source = (record.source or normalized_source).strip() or "MARC Import"
+                lccn, nlmcn = validate_call_numbers(record.lccn, record.nlmcn)
                 # Choose the numerically lowest ISBN as the canonical key so
                 # different editions of the same title converge to one row.
                 lowest_isbn = pick_lowest_isbn(isbns)
                 other_isbns = [isbn for isbn in isbns if isbn != lowest_isbn]
 
-                if record.lccn or record.nlmcn:
+                if lccn or nlmcn:
                     main_batch.append(
                         MainRecord(
                             isbn=lowest_isbn,
-                            lccn=record.lccn,
-                            lccn_source=record_source if record.lccn else None,
-                            nlmcn=record.nlmcn,
-                            nlmcn_source=record_source if record.nlmcn else None,
+                            lccn=lccn,
+                            lccn_source=record_source if lccn else None,
+                            nlmcn=nlmcn,
+                            nlmcn_source=record_source if nlmcn else None,
                             source=record_source,
                             date_added=date_value,
                         )

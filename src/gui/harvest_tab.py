@@ -159,6 +159,8 @@ class HarvestTab(QWidget):
 
     # Reserved for future delegation of the start action to the main window.
     request_start_harvest = pyqtSignal()
+    marc_import_started = pyqtSignal()
+    marc_import_finished = pyqtSignal(bool, dict)
 
     def __init__(self):
         """Initialise instance variables and build the UI.
@@ -2230,6 +2232,7 @@ class HarvestTab(QWidget):
             return
         source_name = source_name.strip() or default_source
 
+        self.marc_import_started.emit()
         self._btn_import_marc.setEnabled(False)
         self._marc_hint_label.setText("Step 1/3 - Reading MARC file...")
         QApplication.processEvents()
@@ -2239,12 +2242,32 @@ class HarvestTab(QWidget):
         except Exception as exc:
             self._marc_hint_label.setText("Could not read the MARC file. Make sure it is a valid .mrc or .xml file.")
             self._btn_import_marc.setEnabled(True)
+            self.marc_import_finished.emit(
+                False,
+                {
+                    "error": "Could not read the MARC file",
+                    "found": 0,
+                    "failed": 0,
+                    "skipped": 0,
+                    "invalid": 0,
+                },
+            )
             return
 
         total_records = len(records)
         if total_records == 0:
             self._marc_hint_label.setText("No records found in the MARC file.")
             self._btn_import_marc.setEnabled(True)
+            self.marc_import_finished.emit(
+                False,
+                {
+                    "error": "No records found in the MARC file",
+                    "found": 0,
+                    "failed": 0,
+                    "skipped": 0,
+                    "invalid": 0,
+                },
+            )
             return
 
         self._marc_hint_label.setText(f"Step 2/3 - Processing {total_records:,} records...")
@@ -2304,6 +2327,16 @@ class HarvestTab(QWidget):
         if replace_existing_source is None:
             self._btn_import_marc.setEnabled(True)
             self._marc_hint_label.setText("Import cancelled.")
+            self.marc_import_finished.emit(
+                False,
+                {
+                    "cancelled": True,
+                    "found": 0,
+                    "failed": 0,
+                    "skipped": 0,
+                    "invalid": 0,
+                },
+            )
             return
 
         marc_service = MarcImportService(
@@ -2357,6 +2390,16 @@ class HarvestTab(QWidget):
         self._marc_stat_matched.setText(f"{db_summary.main_rows:,}")
         self._marc_stat_unmatched.setText(f"{skipped + db_summary.skipped_records:,}")
         self._btn_import_marc.setEnabled(True)
+        self.marc_import_finished.emit(
+            True,
+            {
+                "found": db_summary.main_rows,
+                "failed": 0,
+                "skipped": skipped + db_summary.skipped_records,
+                "invalid": 0,
+                "marc_import": True,
+            },
+        )
 
         mode_label = {"lccn": "LCCN Only", "nlmcn": "NLM Only", "both": "Both (LCCN & NLM)"}.get(mode, mode)
         summary_lines = [
