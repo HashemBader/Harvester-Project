@@ -1,26 +1,47 @@
-# CLI Reference — LCCN Harvester
+# CLI Reference
 
-The primary interface for LCCN Harvester is the desktop GUI. This reference covers the command-line interface, intended for scripting and headless use. The CLI works on macOS, Windows, and Linux.
+The repository includes a small command-line utility for running the harvest pipeline without the GUI.
+
+Main entry points:
+
+- `python src/harvester_cli.py`
+- `python -m src`
 
 ---
 
-## Quick Start
+## What The CLI Currently Does
 
-### Prepare an input TSV
+The CLI:
 
-- File type: `.tsv`
-- One ISBN per line (first column)
-- Hyphens and spaces are stripped automatically
+1. Validates the input path.
+2. Initializes the shared SQLite database.
+3. Parses the input file with the same parser used by the GUI.
+4. Runs the harvest pipeline.
+5. Prints a text summary to the terminal.
 
-Example `input.tsv`:
+The CLI is intentionally narrower than the GUI. It does not expose profile switching, target editing, live GUI output files, or MARC import.
 
-```text
-978-0-13-110362-7
-0131103628
-9780306406157
-```
+By default it uses the shared database at `data/lccn_harvester.sqlite3` and the default API target set used by the harvest pipeline.
 
-### Run the CLI
+---
+
+## Supported Input Files
+
+The shared parser accepts:
+
+- `.tsv`
+- `.txt`
+- `.csv`
+- `.xlsx`
+- `.xls`
+
+Column 1 is treated as the primary ISBN. Extra columns are treated as linked variants.
+
+---
+
+## Usage
+
+Basic run:
 
 ```bash
 python src/harvester_cli.py --input path/to/input.tsv
@@ -32,25 +53,40 @@ Short flag:
 python src/harvester_cli.py -i path/to/input.tsv
 ```
 
-Dry-run (no database writes):
+Dry run:
 
 ```bash
 python src/harvester_cli.py -i path/to/input.tsv --dry-run
 ```
 
+Alternative package entry point:
+
+```bash
+python -m src -i path/to/input.tsv
+```
+
 ---
 
-## What the CLI Does
+## Arguments
 
-Given an input TSV, the CLI:
+| Argument | Required | Meaning |
+|----------|----------|---------|
+| `--input`, `-i` | Yes | Input file path |
+| `--dry-run` | No | Query targets without writing to the database |
+| `--stop-rule` | No | Stop behavior for the underlying `both`-mode harvest logic |
 
-1. Validates that the input file exists and is a regular file.
-2. Initializes the SQLite database (creates tables if needed).
-3. Parses and normalizes ISBNs from the input file.
-4. Runs the full harvest pipeline (cache check → retry gate → target queries → DB write).
-5. Prints a summary of results.
+Supported `--stop-rule` values:
 
-### Console output
+- `stop_either`
+- `stop_lccn`
+- `stop_nlmcn`
+- `continue_both`
+
+The CLI does not currently expose a separate `call_number_mode` flag, so the stop rule is primarily useful for the pipeline's default combined lookup behavior.
+
+---
+
+## Example Console Output
 
 ```text
 LCCN Harvester
@@ -60,70 +96,38 @@ LCCN Harvester
 - ISBNs:     parsed 3 entries
 - Preview:   9780131103627, 0131103628, 9780306406157
 
-Harvest complete: 2 found, 1 failed
+Summary:
+- Total ISBNs:          3
+- Cached hits:          0
+- Skipped recent fails: 0
+- Attempted:            3
+- Successes:            2
+- Failures:             1
 ```
 
-### Exit codes
+---
+
+## Exit Codes
 
 | Code | Meaning |
 |------|---------|
-| `0` | Success — harvest ran (some ISBNs may still have no result) |
-| `1` | Input file error or database initialization failure |
+| `0` | The command completed |
+| `1` | Input validation or database initialization failed |
 
 ---
 
-## Arguments
+## Limitations
 
-| Argument | Required | Description |
-|----------|----------|-------------|
-| `--input` / `-i` | Yes | Path to the TSV file containing ISBNs |
-| `--dry-run` | No | Run without writing to the database (default: `False`) |
-| `--stop-rule` | No | Stop behaviour in `both` mode — `stop_either` (default), `stop_lccn`, `stop_nlmcn`, `continue_both` |
+- No target-management flags
+- No MARC import
+- No GUI-style timestamped export files
+- No profile-selection flag
 
----
-
-## Output Files
-
-The CLI writes the same output files as the GUI:
-
-| File | Contents |
-|------|---------|
-| `*_successful.tsv` / `.csv` | ISBNs with call numbers found |
-| `*_failed.tsv` / `.csv` | ISBNs with no call number found |
-| `*_invalid.tsv` / `.csv` | ISBNs that failed format validation |
-| `*_problems.tsv` / `.csv` | Per-target error summaries |
-
-Output files are written to `data/` by default. The database is at `data/lccn_harvester.sqlite3`.
-
----
-
-## Troubleshooting
-
-### "Input file does not exist"
-
-```
-ERROR: Input file does not exist: /path/to/file.tsv
-```
-
-Check your path and ensure the file exists.
-
-### "Input path is not a file"
-
-```
-ERROR: Input path is not a file: /path/to/folder
-```
-
-Provide a path to a `.tsv` file, not a directory.
-
-### Module not found / import errors
-
-- Ensure your virtual environment is activated.
-- Ensure dependencies are installed: `pip install -r requirements.txt`
-- Run from the project root so `src/` paths resolve correctly.
+For the full workflow, use the desktop application.
 
 ---
 
 ## See Also
 
-- [user_guide.md](user_guide.md) — Full GUI user guide
-- [installation_guide.md](installation_guide.md) — Installation instructions
+- [user_guide.md](user_guide.md)
+- [technical_manual.md](technical_manual.md)

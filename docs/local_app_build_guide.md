@@ -1,63 +1,25 @@
 # Local App Build Guide
 
-This guide explains how to create a local desktop app from the repository on:
-- macOS
-- Windows
+Use this guide to build local macOS or Windows packages from the repository.
 
-This workflow is meant to match the `main` branch.
-
-Why this is the recommended approach:
-- A committed `.app` or `.exe` will go out of date unless it is rebuilt after every code change.
-- macOS and Windows need different build outputs.
-- Rebuilding from `main` gives you an app that reflects the current repository state without storing generated binaries in git.
-
-The repository already includes build scripts for both platforms:
-- macOS: `build_mac.sh`
-- Windows: `build_windows.bat`
-
----
-
-## Always Build From `main`
-
-Before creating a local app, make sure your checkout matches the latest `main` branch:
-
-```bash
-git checkout main
-git pull origin main
-```
-
-The existing build scripts are already written to expect `main`.
+The provided scripts expect you to build from the `main` branch and will refuse to continue if you are on a different branch.
 
 ---
 
 ## Prerequisites
 
-You will need:
-- A clone or fork of this repository
-- Python 3.11 or newer
-- Project dependencies installed
+- Python installed
+- Project dependencies available
+- A clean enough checkout to build from
 
-macOS / Linux setup:
+Optional:
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-Windows PowerShell setup:
-
-```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-```
-
-If packaging tools are missing, the build scripts can install them automatically when run with `INSTALL_BUILD_DEPS=1`.
+- Set `INSTALL_BUILD_DEPS=1` to let the scripts install packaging dependencies automatically
+- Install Inno Setup 6 on Windows if you also want the installer package
 
 ---
 
-## macOS App
+## macOS
 
 From the project root:
 
@@ -66,68 +28,48 @@ chmod +x build_mac.sh
 INSTALL_BUILD_DEPS=1 ./build_mac.sh
 ```
 
-Expected output:
+Expected outputs:
+
 - `dist/LCCN Harvester.app`
-- `dist/LCCN_Harvester.dmg` when disk image creation succeeds
-
-To run the generated app:
-
-```bash
-open "dist/LCCN Harvester.app"
-```
-
-To update the app later:
-
-```bash
-git checkout main
-git pull origin main
-INSTALL_BUILD_DEPS=1 ./build_mac.sh
-```
-
-This rebuilds the app from the latest `main` branch code.
+- `dist/LCCN_Harvester.dmg` when DMG creation succeeds
 
 ---
 
-## Windows App
+## Windows
 
-Open Command Prompt or PowerShell in the project root and run:
+From Command Prompt or PowerShell:
 
 ```bat
 set INSTALL_BUILD_DEPS=1
 build_windows.bat
 ```
 
-Expected output:
+Expected outputs:
+
 - `dist\LCCN_Harvester.exe`
-- `dist\LCCN_Harvester_Setup.exe` if Inno Setup 6 is installed
-
-To run the generated app:
-- Double-click `dist\LCCN_Harvester.exe`
-
-To update the app later:
-
-```bat
-git checkout main
-git pull origin main
-set INSTALL_BUILD_DEPS=1
-build_windows.bat
-```
-
-This rebuilds the executable from the latest `main` branch code.
+- `dist\LCCN_Harvester_Setup.exe` when Inno Setup 6 is installed
 
 ---
 
-## Linux
+## Notes
 
-Linux users can continue running the project from the terminal instead of building a packaged desktop app.
+- Both scripts call PyInstaller with `LCCN_Harvester.spec`.
+- The build scripts clean `build/` and `dist/` before packaging.
+- macOS and Windows builds are separate; there is no packaged Linux build script in this repository.
 
 ---
 
-## Recommended Team Workflow
+## Recommended Workflow
 
 1. Switch to `main`.
-2. Pull the latest changes from `origin/main`.
-3. Rebuild the app for your platform.
-4. Use the newly generated output from `dist/`.
+2. Pull the latest changes.
+3. Ensure dependencies are installed.
+4. Run the platform build script.
+5. Smoke-test the generated app before sharing it.
 
-That keeps the local app aligned with the repository's `main` branch.
+---
+
+## See Also
+
+- [installation_guide.md](installation_guide.md)
+- [contribution_guide.md](contribution_guide.md)

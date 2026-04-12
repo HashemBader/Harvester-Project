@@ -20,11 +20,11 @@ from .app_paths import get_app_root, get_bundle_root
 
 # Client-editable Help-page destinations. Use ``repo:...`` to force a browser page.
 # Support guidance page link
-SUPPORT_GUIDANCE_URL = "repo:docs/README.md"
+SUPPORT_GUIDANCE_URL = "repo:docs/OVERVIEW.md"
 # User guide documentation link
 USER_GUIDE_URL = "repo:docs/user_guide.md"
 # Web accessibility statement link
-ACCESSIBILITY_STATEMENT_URL = "repo:docs/wcag.md"
+ACCESSIBILITY_STATEMENT_URL = "repo:docs/WCAG_ACCESSIBILITY.md"
 # Default repository URL (used if Git is not available)
 REPOSITORY_WEB_URL = "https://github.com/HashemBader/LCCN-Harvester-Project"
 # Default Git branch (used if current branch cannot be detected)

@@ -1,75 +1,87 @@
 # LCCN Harvester
 
-A desktop application that automatically retrieves Library of Congress Call Numbers (LCCNs) and National Library of Medicine Call Numbers (NLMCNs) for large lists of ISBNs.
+LCCN Harvester is a PyQt6 desktop application for looking up Library of Congress and National Library of Medicine call numbers from lists of ISBNs.
 
-Instead of searching multiple library catalogues manually, cataloguers upload a single TSV file. The application queries multiple sources in priority order, caches results locally, and produces structured output files ready for import into the library management system.
+It supports API and Z39.50 targets, local caching in SQLite, linked ISBN handling, MARC import, named profiles, and timestamped TSV/CSV exports for each run.
 
 ---
 
 ## Features
 
-- **Multi-source querying** — Library of Congress, Harvard LibraryCloud, OpenLibrary (REST APIs), and configurable Z39.50 catalog servers
-- **Smart caching** — successful results are stored in a per-profile SQLite database; cached ISBNs are never re-queried
-- **Edition linking** — sibling ISBNs of a cached edition are resolved locally without external queries
-- **MARC import** — import call numbers directly from MARC files, bypassing API lookups
-- **Named profiles** — separate source priorities, retry windows, and call number modes per cataloguing workflow
-- **Dual call number modes** — harvest LCCN only, NLMCN only, or both in a single run
-- **Structured output** — TSV and CSV output files (successful, failed, invalid, problems) after every run
-- **Light and dark theme** — Catppuccin-inspired palette, persisted across sessions
-- **Cross-platform** — macOS, Windows, Linux; distributable as a standalone executable via PyInstaller
+- Desktop GUI with four primary pages: `Dashboard`, `Configure`, `Harvest`, and `Help`
+- Built-in API targets for Library of Congress, Harvard LibraryCloud, and OpenLibrary
+- Configurable Z39.50 targets stored per profile
+- Shared SQLite cache with linked-ISBN support
+- Profile-specific settings and output folders
+- Harvest modes for `LCCN only`, `NLMCN only`, or `Both`
+- Per-run `Database only for this run` option
+- MARC import from binary MARC21 (`.mrc`, `.marc`) and MARCXML (`.xml`)
+- Timestamped TSV exports plus UTF-8-BOM CSV copies
+- Light and dark themes, persisted in `data/gui_settings.json`
+- Local build scripts for macOS and Windows
 
 ---
 
 ## Quick Start
 
-**macOS / Linux:**
+macOS / Linux:
+
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 python app_entry.py
 ```
 
-**Windows (PowerShell):**
+Windows PowerShell:
+
 ```powershell
-py -m venv .venv; .\.venv\Scripts\Activate.ps1
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 python app_entry.py
 ```
 
-See [docs/installation_guide.md](docs/installation_guide.md) for packaged executable installation and platform-specific notes.
+On macOS and Linux you can also use `./run_gui.sh`, which sets certificate-related environment variables before launching the app.
 
 ---
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [docs/user_guide.md](docs/user_guide.md) | Full user guide |
-| [docs/installation_guide.md](docs/installation_guide.md) | Installation instructions |
-| [docs/cli_reference.md](docs/cli_reference.md) | Command-line interface reference |
-| [docs/technical_manual.md](docs/technical_manual.md) | Architecture and developer reference |
-| [docs/contribution_guide.md](docs/contribution_guide.md) | Developer setup and contribution workflow |
+Start with [docs/index.md](docs/index.md) for the full index or [docs/OVERVIEW.md](docs/OVERVIEW.md) for the grouped overview.
+
+| Document | Purpose |
+|----------|---------|
+| [docs/user_guide.md](docs/user_guide.md) | How to use the GUI, profiles, targets, harvest runs, outputs, and MARC import |
+| [docs/concepts.md](docs/concepts.md) | Plain-language glossary for ISBNs, call numbers, caching, linked ISBNs, and MARC |
+| [docs/installation_guide.md](docs/installation_guide.md) | Install and run from source or build locally |
+| [docs/local_app_build_guide.md](docs/local_app_build_guide.md) | Build macOS and Windows desktop packages |
+| [docs/cli_reference.md](docs/cli_reference.md) | Command-line utility reference |
+| [docs/technical_manual.md](docs/technical_manual.md) | Architecture, storage layout, pipeline, and internal reference |
+| [docs/contribution_guide.md](docs/contribution_guide.md) | Developer setup, tests, and contribution notes |
+| [docs/WCAG_ACCESSIBILITY.md](docs/WCAG_ACCESSIBILITY.md) | Accessibility notes and self-assessment context |
+| [docs/WCAG_SELF_CHECK_REPORT.md](docs/WCAG_SELF_CHECK_REPORT.md) | Generated report from the internal WCAG self-check |
 
 ---
 
 ## Repository Layout
 
-```
+```text
 src/
-  gui/          PyQt6 interface (tabs, dialogs, theming)
-  harvester/    Orchestrator, API/Z39.50 targets, MARC import, export
-  database/     DatabaseManager, schema
-  config/       ProfileManager
-  utils/        ISBN/LCCN/NLMCN validators, MARC parser
-  z3950/        Pure-Python Z39.50 client
-tests/          pytest test suite
-docs/           All project documentation
-data/           Sample input files and per-profile output data
-config/         Profile JSON files, targets configuration
+  api/          HTTP API clients
+  config/       Path helpers, profile manager, help-link config
+  database/     SQLite schema and database access layer
+  gui/          Main window, tabs, dialogs, styles, notifications
+  harvester/    Orchestrator, targets, MARC import, run pipeline
+  utils/        Validators, parsers, target persistence helpers
+  z3950/        Z39.50 compatibility and client code
+docs/           Project documentation
+config/         Active-profile file, default profile, saved profile folders
+data/           GUI settings, runtime database, profile output folders
 ```
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

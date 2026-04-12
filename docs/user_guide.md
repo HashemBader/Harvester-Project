@@ -1,258 +1,338 @@
-# User Guide — LCCN Harvester
+# User Guide
 
-**Version 1.0.0**
+This guide covers the current GUI workflow for LCCN Harvester.
 
-This guide explains how to use the LCCN Harvester desktop application to look up Library of Congress Call Numbers (LCCNs) and National Library of Medicine Call Numbers (NLMCNs) for a list of ISBNs.
+For plain-language definitions of ISBNs, call numbers, MARC, caching, and linked ISBNs, see [concepts.md](concepts.md).
 
 ---
 
 ## Overview
 
-The LCCN Harvester takes a TSV file of ISBNs, queries multiple library sources (API targets and Z39.50 servers) in priority order, and saves results to a local database and output files. Results are immediately available on the Dashboard during and after each run.
+LCCN Harvester reads a list of ISBNs, checks the local SQLite cache, queries enabled targets when needed, and writes timestamped result files in the active profile's output folder.
+
+The application has four main pages:
+
+| Page | Purpose |
+|------|---------|
+| `Dashboard` | Run status, KPI cards, recent results, result-file buttons, linked-ISBN tools |
+| `Configure` | Profile settings and target management |
+| `Harvest` | Input-file preview, harvest controls, and MARC import |
+| `Help` | Keyboard shortcuts, accessibility links, and documentation links |
+
+The app currently opens on the `Configure` page.
 
 ---
 
-## Launching the Application
+## Launching the App
 
-LCCN Harvester runs on **macOS, Windows, and Linux**.
-
-- **Packaged executable** — double-click the app file for your platform. No setup required.
-- **From source** — run the following from the project root:
+From source:
 
 ```bash
 python app_entry.py
 ```
 
-The application opens to the **Dashboard** tab. A collapsible sidebar on the left provides navigation.
+On macOS and Linux you can also use:
 
----
+```bash
+./run_gui.sh
+```
 
-## Interface Overview
-
-The application has four tabs, accessible from the left sidebar:
-
-| Tab | Purpose |
-|-----|---------|
-| **Dashboard** | Harvest statistics, live activity monitor, and recent results |
-| **Configure** | Target list and per-profile settings |
-| **Harvest** | Run and monitor harvests; import MARC records |
-| **Help** | Keyboard shortcuts, accessibility info, and this user manual |
-
-The sidebar also shows a **status pill** (Idle / Running / Paused / Completed / Cancelled / Error) reflecting the current harvester state.
+Packaged builds created with the repository build scripts launch the same GUI.
 
 ---
 
 ## Profiles
 
-Profiles let you maintain separate configurations (targets, retry interval, call number mode) for different cataloguing workflows.
+Profiles keep settings and targets separate for different workflows.
 
-### Switching profiles
-- Use the profile selector on the **Dashboard** or in **Configure → Settings**.
-- The active profile name is displayed at the top of the Dashboard.
+Each profile has:
 
-### Creating a profile
-1. Go to **Configure → Settings**.
-2. Click **New Profile**.
-3. Enter a name and choose starting settings.
-4. Click **OK**.
+- Its own settings JSON under `config/profiles/<slug>/`
+- Its own targets TSV under `config/profiles/<slug>/`
+- Its own output folder under `data/<slug>/`
 
-### Deleting a profile
-Select the profile in **Configure → Settings** and click **Delete**. The default profile cannot be deleted.
+All profiles share the same SQLite database file at `data/lccn_harvester.sqlite3`.
 
-> **Note:** Switching profiles resets the Harvest tab. Any in-progress harvest must be stopped first.
+### Important profile behavior
 
----
+- `Default Settings` is built in and read-only.
+- To keep changes, create a new profile and save there.
+- Deleting a profile removes its saved configuration files, but its existing output folder is left in place.
 
-## Configuring Targets (Configure → Targets)
+### Create a profile
 
-Targets are the library sources the harvester queries. They are tried in rank order — the harvester stops at the first successful match for each ISBN ("stop on find").
+1. Open `Configure`.
+2. In `Profile Settings`, click `New Profile`.
+3. Choose the source profile to copy from.
+4. Enter a new name and confirm.
 
-### Target types
-- **API targets** — Library of Congress (LOC), Harvard LibraryCloud, OpenLibrary
-- **Z39.50 targets** — library catalog servers using the Z39.50 protocol
+### Switch profiles
 
-### Managing targets
-- **Enable / Disable** — check or uncheck a target to include or exclude it from harvests.
-- **Priority (Rank)** — lower rank number = tried first. Use the up/down controls to reorder.
-- Changes are saved per profile.
+Use the profile selector on the `Configure` page. Switching profiles reloads both settings and targets.
 
 ---
 
-## Settings (Configure → Settings)
+## Configure: Targets
 
-| Setting | Description | Default |
-|---------|-------------|---------|
-| **Retry Interval** | Days before retrying an ISBN that previously failed on all targets | 7 days |
-| **Call Number Selection** | Which call number type(s) to harvest | LCCN only |
+The targets table contains both built-in API targets and any Z39.50 targets for the active profile.
 
-### Call Number Selection modes
+Supported target types:
 
-| Mode | Behaviour |
-|------|-----------|
-| **LCCN only** | Harvest Library of Congress call numbers (MARC 050) |
-| **NLMCN only** | Harvest National Library of Medicine call numbers (MARC 060) |
-| **Both** | Harvest both LCCN and NLMCN; stop once either is found (configurable) |
+- API targets
+- Z39.50 targets
 
-Click **Save** to persist any changes to the active profile.
+From this page you can:
+
+- Enable or disable targets
+- Change rank order
+- Add or edit Z39.50 targets
+- Search the target list
+- Run connectivity checks
+
+Lower rank numbers are tried first during a harvest.
 
 ---
 
-## Preparing Input
+## Configure: Harvest Settings
 
-### File format
-- Type: `.tsv` (tab-separated values)
-- One ISBN per line (first column)
-- Hyphens and spaces are stripped automatically
+The `Harvest Settings` card stores the profile defaults used when a run begins.
 
-### Supported ISBN formats
-- ISBN-10 (10 digits, may end in `X`)
-- ISBN-13 (13 digits, starts with `978` or `979`)
+| Setting | Meaning |
+|---------|---------|
+| `Retry Interval` | Days to wait before retrying a failed lookup |
+| `Call Number Selection` | `LCCN only`, `NLMCN only`, or `Both` |
 
-### Example `input.tsv`
-```
-978-0-13-110362-7
-0131103628
+When a harvest run starts from the `Harvest` page, the run controls can override parts of this configuration for that run.
+
+---
+
+## Preparing Input Files
+
+Accepted input formats:
+
+| Format | Extensions |
+|--------|------------|
+| Tab-separated text | `.tsv`, `.txt` |
+| Comma-separated text | `.csv` |
+| Excel | `.xlsx`, `.xls` |
+
+Input rules:
+
+- Column 1 is the primary ISBN.
+- Columns 2 and later are treated as linked ISBN variants for the same row.
+- Blank rows are ignored.
+- Rows beginning with `#` are treated as comments.
+- Duplicate valid ISBNs are processed once.
+- Hyphens and spaces are stripped before validation.
+
+Recognized first-column header values include:
+
+- `ISBN`
+- `ISBNs`
+- `ISBN10`
+- `ISBN13`
+- `World ISBN`
+- `Book ISBN`
+
+Example:
+
+```text
+ISBN
+978-0-13-110362-7	0131103628
 9780306406157
 ```
 
 ---
 
-## Running a Harvest (Harvest Tab)
+## Harvest Page
 
-### Steps
-1. Go to the **Harvest** tab.
-2. Select an input file by dragging and dropping it onto the drop zone, or clicking **Choose File**.
-3. Click **Start Harvest**.
-4. Monitor progress in the progress bar and activity log.
-5. When complete, output files are listed in the Harvest tab. Results also appear live on the **Dashboard**.
+The `Harvest` page has three main areas:
 
-### Harvest controls
+- Run setup
+- File statistics and preview
+- MARC import
 
-| Control | Action |
-|---------|--------|
-| **Start Harvest** | Begin processing the input file |
-| **Pause** | Suspend processing (resume with the same button) |
-| **Stop / Cancel** | Stop the current run. Results collected so far are saved. |
-| **New Harvest** | Reset the tab for a new input file |
+### Run setup controls
 
-### Retry bypass
-If some ISBNs were recently skipped due to the retry window, you can check **Bypass retry for this run** before starting to force a fresh attempt on all ISBNs in the file.
+| Control | Meaning |
+|---------|---------|
+| `Input file` | Select or drag in the harvest input file |
+| `Run Mode` | `LCCN Only`, `NLM Only`, `Both (LCCN & NLM)`, or `MARC Import Only` |
+| `Stop Rule` | Active only when run mode is `Both` and DB-only is off |
+| `Database only for this run` | Skip external targets and search the local database only |
 
----
+`MARC Import Only` sets the run to use the local database only, which is useful after seeding records through the MARC Import section.
 
-## Understanding Outputs
+### Stop Rule options
 
-All output files are written to the active profile's data directory. Each run overwrites the previous run's files.
+| Option | Meaning |
+|--------|---------|
+| `Stop if either found` | Stop when either an LCCN or NLMCN is found |
+| `Stop if LCCN found` | Stop once an LCCN is found |
+| `Stop if NLMCN found` | Stop once an NLMCN is found |
+| `Continue until both found` | Keep querying until both types are found or targets are exhausted |
 
-### Successful results (`*_successful.tsv` / `.csv`)
+### Running a harvest
 
-Columns vary by call number mode:
+1. Open `Harvest`.
+2. Select or drag in an input file.
+3. Review the file statistics and preview.
+4. Adjust run mode if needed.
+5. Click `Start Harvest`.
 
-**LCCN only:**
-`ISBN · LCCN · LCCN Source · Classification · Date`
+During a run you can:
 
-**NLMCN only:**
-`ISBN · NLM · NLM Source · Date`
-
-**Both:**
-`ISBN · LCCN · LCCN Source · Classification · NLM · NLM Source · Date`
-
-- **Classification** — the LoC class prefix derived from the LCCN (e.g., `QA`, `HF`)
-- **Date** — the date the record was harvested (ISO format)
-- A `.csv` copy is generated automatically for use in Excel and Google Sheets
-
-### Failed (`*_failed.tsv` / `.csv`)
-ISBNs for which no call number was found. Columns: `Call Number Type · ISBN · Target · Date Attempted · Reason`
-
-### Invalid (`*_invalid.tsv` / `.csv`)
-ISBNs that failed format validation (wrong length, bad check digit, etc.). Column: `ISBN`
-
-### Problems (`*_problems.tsv` / `.csv`)
-Per-target error summaries: `Target · Problem`
-
-### Local database
-All successful results are cached in a per-profile SQLite database. On subsequent runs, cached ISBNs are served from the database without re-querying external sources, saving time and API calls.
+- Pause and resume
+- Cancel the run
+- Watch live status updates on the `Dashboard`
 
 ---
 
-## MARC Import (Harvest Tab)
+## Harvest Outputs
 
-You can import call numbers directly from a MARC file instead of (or in addition to) querying external sources.
+Harvest output files are written into the active profile folder under `data/<profile-slug>/`.
 
-### Steps
-1. In the **Harvest** tab, click **Import MARC**.
-2. Select a MARC file.
-3. Choose the call number mode (LCCN, NLMCN, or Both).
-4. Confirm. Records are imported into the database and written to the results files.
+Each harvest creates timestamped files with names like:
+
+- `<profile>-success-<timestamp>.tsv`
+- `<profile>-failed-<timestamp>.tsv`
+- `<profile>-invalid-<timestamp>.tsv`
+- `<profile>-problems-<timestamp>.tsv`
+- `<profile>-linked-isbns-<timestamp>.tsv`
+
+Each TSV also gets a CSV copy with UTF-8 BOM for spreadsheet compatibility.
+
+### Successful results
+
+Columns depend on the active mode:
+
+| Mode | Columns |
+|------|---------|
+| `LCCN only` | `ISBN`, `LCCN`, `LCCN Source`, `Classification`, `Date` |
+| `NLMCN only` | `ISBN`, `NLM`, `NLM Source`, `Date` |
+| `Both` | `ISBN`, `LCCN`, `LCCN Source`, `Classification`, `NLM`, `NLM Source`, `Date` |
+
+### Failed results
+
+Columns:
+
+`Call Number Type`, `ISBN`, `Target`, `Date Attempted`, `Reason`
+
+In `Both` mode, a single ISBN can produce more than one failed row because LCCN and NLMCN failures are tracked separately.
+
+### Invalid results
+
+Columns:
+
+`ISBN`
+
+### Problems results
+
+Columns:
+
+`Target`, `Problem`
+
+This file is for target or connectivity problems, not normal "not found" results.
+
+### Linked ISBNs snapshot
+
+Columns:
+
+`ISBN`, `Canonical ISBN`
+
+This file is a snapshot of the current linked-ISBN mappings in the database at the time of the run.
+
+---
+
+## MARC Import
+
+The `MARC Import` section is separate from the standard harvest run.
+
+Supported file types:
+
+- Binary MARC21: `.mrc`, `.marc`
+- MARCXML: `.xml`
+
+### MARC import flow
+
+1. Select or drag in a MARC file.
+2. Click `Run`.
+3. Enter a source name when prompted.
+4. The import uses the current call-number mode from the active configuration.
+5. Matching records are saved into the shared SQLite database.
+6. A timestamped export is written to the active profile folder:
+   `data/<profile-slug>/<profile>-marc-import-<timestamp>.tsv`
+
+Records with ISBNs but no call number are recorded in the database as attempted rows. Records with no usable ISBN are skipped.
 
 ---
 
 ## Dashboard
 
-The Dashboard provides an at-a-glance view of the current profile's harvest data.
+The `Dashboard` summarizes the current session and gives quick access to outputs and maintenance tools.
 
-| Section | Shows |
-|---------|-------|
-| **KPI cards** | Total ISBNs in database, Found, Failed, and Cached counts |
-| **Live Activity** | Real-time per-ISBN status during a running harvest |
-| **Recent Results** | A scrollable table of the most recent ISBN outcomes (ISBN, status, source) |
-| **Last Run** | Timestamp and outcome of the last completed harvest |
+Main sections:
 
-The Dashboard refreshes automatically when a harvest completes or when you switch to it.
+- Run status pill
+- Pause and cancel buttons during active runs
+- KPI cards for processed, successful, failed, and invalid rows
+- Result-file buttons for the most recent run
+- Recent results list
+- `Browse Database`
+- `Linked ISBNs`
+- `Reset Dashboard Stats`
+
+`Browse Database` is a read-only viewer for the `main`, `attempted`, and `linked_isbns` tables with search, filtering, and pagination.
 
 ---
 
-## Keyboard Shortcuts
+## Help And Accessibility
 
-| Action | macOS | Windows | Linux |
-|--------|-------|---------|-------|
-| Toggle sidebar | Control+B | Ctrl+B | Ctrl+B |
-| Quit | Control+Q | Ctrl+Q | Ctrl+Q |
-| Refresh Dashboard | Control+R | Ctrl+R | Ctrl+R |
-| Open Dashboard | Control+1 | Ctrl+1 | Ctrl+1 |
-| Open Configure | Control+2 | Ctrl+2 | Ctrl+2 |
-| Open Harvest | Control+3 | Ctrl+3 | Ctrl+3 |
-| Open Help | Control+4 | Ctrl+4 | Ctrl+4 |
-| Start harvest | Control+H | Ctrl+H | Ctrl+H |
-| Stop harvest | Esc | Esc | Esc |
-| Cancel harvest | Control+. | Ctrl+. | Ctrl+. |
+The `Help` page provides:
+
+- Keyboard shortcut reference
+- Accessibility statement link
+- Support and guidance link
+- User guide link
+- App version and platform summary
+
+The application also creates a system tray icon when the platform supports it. From the tray menu you can show the window, toggle notifications, or quit.
 
 ---
 
 ## Troubleshooting
 
-### No results for an ISBN
-Possible causes:
-- The ISBN is invalid or has a typo.
-- No configured target has a record for this ISBN.
-- All targets timed out — check your network connection.
-- The ISBN was recently attempted and is within the retry window. Use **Bypass retry** to force a retry.
+### No results returned
 
-### ISBN shows as invalid
-- Verify the ISBN length (10 or 13 digits) and check digit.
-- Remove any leading/trailing spaces in your input file.
+- Check that at least one target is enabled.
+- Verify your network connection.
+- Confirm the ISBN is valid and present in column 1.
+- If you expect a cached result, try `Database only for this run`.
 
-### Harvest stops immediately with "No valid ISBNs"
-- Ensure the input file is a `.tsv` file with ISBNs in the first column.
-- Confirm the file is not empty.
+### File preview shows no valid rows
 
-### SSL / certificate errors
-If you see `CERTIFICATE_VERIFY_FAILED`:
+- Confirm the file format is supported.
+- Make sure ISBNs are in the first column.
+- Check that the first row is either real data or a recognized header.
+
+### SSL or certificate problems
+
 ```bash
 python3 -m pip install --upgrade pip certifi
 ```
 
-### Target shows as offline / unavailable
-- Check your internet connection.
-- If a target returns `403 Forbidden`, it may be blocking your IP or network. Try a different network or temporarily disable that target in **Configure → Targets**.
+### Database locked
 
-### Profile settings not saving
-- Click **Save** after making changes in **Configure → Settings**.
-- Ensure you have write access to the application's data directory.
+Another process may still have the SQLite database open. Close other app instances and try again.
+
+### Target unavailable
+
+Use `Check Servers` on the `Configure` page. A normal "not found" response is different from a target problem and will not appear in the problems file.
 
 ---
 
 ## See Also
 
-- [installation_guide.md](installation_guide.md) — Installation and setup instructions
-- [cli_reference.md](cli_reference.md) — Command-line interface reference (advanced / scripting use)
+- [concepts.md](concepts.md)
+- [installation_guide.md](installation_guide.md)
+- [cli_reference.md](cli_reference.md)

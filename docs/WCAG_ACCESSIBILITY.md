@@ -1,48 +1,57 @@
-# WCAG Accessibility Notes (Self-Assessed)
+# WCAG Accessibility Notes
 
-This application includes accessibility improvements aimed at WCAG 2.1 AA-style usability for desktop users, especially keyboard-first users.
+This document summarizes the repository's current accessibility work. It is a self-assessment, not a formal certification.
 
-## What Is Already WCAG-Friendly
+---
 
-- Keyboard operation:
-  - Main navigation and major actions are available from keyboard shortcuts.
-  - Standard editing shortcuts are preserved in text fields:
-    - `Cmd/Ctrl+A` select all
-    - `Cmd/Ctrl+C` copy
-    - `Cmd/Ctrl+V` paste
-- Focus visibility:
-  - Buttons and key form controls use visible focus styling.
-- Programmatic labels:
-  - Major controls use accessible names and descriptions so screen readers can announce intent.
-- Discoverability:
-  - A shortcuts dialog is available and searchable.
-  - The dialog detects macOS, Windows, and Linux and shows the right modifier key labels.
-- Readability:
-  - Key status and helper labels use stronger contrast and simpler wording.
+## Current Accessibility-Oriented Features
 
-## Important Limit
+- Keyboard-accessible primary navigation and harvest actions
+- Visible focus styling in the Qt stylesheet
+- Accessible names and descriptions on core controls
+- Shortcut discoverability through the help UI
+- Platform-aware shortcut labels
+- Readable status and helper text across the main workflow
 
-This is **not** a formal legal certification.
+---
 
-A real conformance claim usually requires a structured accessibility audit that includes manual testing with assistive technology, and typically produces a VPAT/ACR or similar report.
+## What This Is Not
 
-## If You Want Formal Certification
+This repository does not ship with a formal conformance statement, VPAT, or third-party accessibility audit report.
 
-Use this workflow for each release:
+Formal WCAG conformance requires manual assistive-technology testing and independent review.
 
-1. Run the internal self-check script:
-   - `python3 wcag_self_check.py --write docs/release/WCAG_SELF_CHECK_REPORT.md`
-2. Perform manual tests with actual users and assistive technology:
-   - Keyboard-only testing
-   - VoiceOver / NVDA screen-reader pass
-   - Zoom and reflow checks
-   - Contrast checks in real screens
-3. Engage a third-party accessibility auditor for a formal report.
-4. Publish that report as your official conformance artifact.
+---
 
-## Suggested Manual Test Matrix
+## Internal Self-Check
 
-- Keyboard only: Can complete input, settings, and harvest workflow without the mouse.
-- Screen reader: Primary controls are announced with meaningful names.
-- Text editing: Copy, paste, and select-all work naturally in all input widgets.
-- Visual contrast: Primary text, disabled states, and focus outlines remain readable.
+The repository includes:
+
+- `wcag_self_check.py`
+- [WCAG_SELF_CHECK_REPORT.md](WCAG_SELF_CHECK_REPORT.md)
+
+The script performs a small static code-level check covering areas such as focus styling, accessible labels, and shortcut discoverability.
+
+To regenerate the report:
+
+```bash
+python3 wcag_self_check.py --write docs/WCAG_SELF_CHECK_REPORT.md
+```
+
+---
+
+## Recommended Manual Verification
+
+For release readiness, manually test:
+
+- Keyboard-only navigation
+- Shortcut discoverability
+- Focus visibility
+- Readability in both light and dark themes
+- Screen-reader labeling on core controls
+
+---
+
+## Scope Note
+
+These notes apply to the current desktop application in this repository. They should be reviewed again whenever major UI changes are made.

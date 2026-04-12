@@ -1,115 +1,97 @@
-# Installation Guide — LCCN Harvester
+# Installation Guide
 
-**Version 1.0.0**
-
-How to install and run LCCN Harvester on macOS, Windows, or Linux — either as a packaged executable or directly from source.
+This guide covers the supported ways to run LCCN Harvester.
 
 ---
 
-## Supported Platforms
+## Option 1: Run From Source
 
-| Platform | Minimum Version |
-|----------|----------------|
-| macOS | 13 (Ventura) or later |
-| Windows | 10 or 11 |
-| Linux | Ubuntu 22.04+ (or equivalent) |
+### Requirements
 
----
+- Python 3.10 or newer
+- A working internet connection for dependency installation
 
-## Option A — Packaged Executable (Recommended)
+### Setup
 
-Download the pre-built executable for your platform from the project releases page and run it directly. No Python installation required.
+macOS / Linux:
 
-- **macOS:** double-click `LCCN Harvester.app`
-- **Windows:** double-click `LCCN_Harvester.exe`
-- **Linux:** run `./LCCN_Harvester` from a terminal
-
----
-
-## Option B — Run from Source
-
-### 1. Install Python 3.10+
-
-Download from [python.org](https://python.org) or use your system package manager.
-
-### 2. Clone the repository
-
-```bash
-git clone <REPO_URL>
-cd LCCN-Harvester-Project
-```
-
-### 3. Create and activate a virtual environment
-
-**macOS / Linux:**
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
+pip install -r requirements.txt
+python app_entry.py
 ```
 
-**Windows (PowerShell):**
+Windows PowerShell:
+
 ```powershell
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
-```
-
-### 4. Install dependencies
-
-```bash
-python -m pip install --upgrade pip
 pip install -r requirements.txt
-```
-
-### 5. Launch the application
-
-```bash
 python app_entry.py
 ```
+
+On macOS and Linux you can also launch with:
+
+```bash
+./run_gui.sh
+```
+
+That helper sets certificate-related environment variables before starting the GUI.
+
+---
+
+## Option 2: Build A Local App Package
+
+Prebuilt binaries are not committed to the repository. Build locally instead:
+
+- macOS: `build_mac.sh`
+- Windows: `build_windows.bat`
+
+See [local_app_build_guide.md](local_app_build_guide.md) for the full packaging workflow.
 
 ---
 
 ## First Run Checklist
 
-1. Confirm you have a working internet connection.
-2. Go to **Configure → Targets** and verify at least one target is enabled.
-3. Prepare a `.tsv` input file with one ISBN per line.
-4. Go to **Harvest**, load the file, and click **Start Harvest**.
+1. Open `Configure`.
+2. Confirm the active profile and target list look correct.
+3. Go to `Harvest`.
+4. Load a test input file and verify the preview.
+5. Start a small harvest run.
 
 ---
 
 ## Troubleshooting
 
-### SSL certificate verify failed
+### `ModuleNotFoundError` or missing dependency errors
+
+Make sure the virtual environment is active and reinstall dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+### Certificate or SSL errors
 
 ```bash
 python3 -m pip install --upgrade pip certifi
 ```
 
-### API returns 403 Forbidden
+### PowerShell blocks virtual-environment activation
 
-This is usually a network policy issue, not an application bug:
-- Try from a different network or disable VPN/proxy.
-- Temporarily disable the affected target in **Configure → Targets**.
-
-### `ModuleNotFoundError: PyQt6`
-
-Ensure your virtual environment is activated and dependencies are installed inside it:
-
-```bash
-pip install -r requirements.txt
-pip list | grep PyQt6
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
-### Application does not open on macOS
+### PyZ3950 install problems
 
-If macOS blocks the app with "unidentified developer":
-- Right-click the app → Open → confirm.
-- Or: System Settings → Privacy & Security → allow the app.
+The project depends on `PyZ3950` from GitHub. If dependency installation fails, retry with network access available and then rerun `pip install -r requirements.txt`.
 
 ---
 
 ## See Also
 
-- [user_guide.md](user_guide.md) — How to use the application
-- [cli_reference.md](cli_reference.md) — Command-line interface
-- [contribution_guide.md](contribution_guide.md) — Developer setup and workflow
+- [user_guide.md](user_guide.md)
+- [local_app_build_guide.md](local_app_build_guide.md)
+- [contribution_guide.md](contribution_guide.md)
