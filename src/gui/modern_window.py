@@ -512,8 +512,6 @@ class ModernMainWindow(QMainWindow):
         self.harvest_tab.result_files_ready.connect(self.dashboard_tab.set_result_files)
         self.harvest_tab.harvest_reset.connect(self._on_harvest_reset)
         self.harvest_tab.harvest_paused.connect(self._on_harvest_paused)
-        self.harvest_tab.marc_import_started.connect(self._on_harvest_started)
-        self.harvest_tab.marc_import_finished.connect(self._on_harvest_finished)
         
         # Live Dashboard Updates
         self.harvest_tab.progress_updated.connect(self._on_harvest_progress)

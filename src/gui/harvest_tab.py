@@ -159,8 +159,6 @@ class HarvestTab(QWidget):
 
     # Reserved for future delegation of the start action to the main window.
     request_start_harvest = pyqtSignal()
-    marc_import_started = pyqtSignal()
-    marc_import_finished = pyqtSignal(bool, dict)
 
     def __init__(self):
         """Initialise instance variables and build the UI.
@@ -448,6 +446,15 @@ class HarvestTab(QWidget):
         self._marc_hint_label.setStyleSheet("font-size: 13px;")
         self._marc_status_label = self._marc_hint_label
         drop_zone_vbox.addWidget(self._marc_hint_label)
+        self._marc_progress_bar = QProgressBar()
+        self._marc_progress_bar.setProperty("class", "TerminalProgressBar")
+        self._marc_progress_bar.setProperty("state", "idle")
+        self._marc_progress_bar.setRange(0, 100)
+        self._marc_progress_bar.setValue(0)
+        self._marc_progress_bar.setTextVisible(False)
+        self._marc_progress_bar.setVisible(False)
+        self._marc_progress_bar.setFixedHeight(8)
+        drop_zone_vbox.addWidget(self._marc_progress_bar)
         marc_vbox.addWidget(self._marc_drop_zone, stretch=1)
 
         # 3. File display plus actions at bottom
@@ -1931,6 +1938,7 @@ class HarvestTab(QWidget):
         self._btn_import_marc.setEnabled(True)
         self._btn_clear_marc.setVisible(True)
         self._marc_hint_label.setText("Click Run to import call numbers into the database.")
+        self._set_marc_import_progress(0, state="idle", visible=False)
 
     def _clear_marc_file(self):
         """Reset all MARC-import controls to their default (no file selected) state."""
@@ -1940,6 +1948,7 @@ class HarvestTab(QWidget):
         self._btn_import_marc.setEnabled(False)
         self._btn_clear_marc.setVisible(False)
         self._marc_hint_label.setText("Drop .mrc or .xml file here")
+        self._set_marc_import_progress(0, state="idle", visible=False)
         for attr in ("_marc_stat_records", "_marc_stat_callnums", "_marc_stat_matched", "_marc_stat_unmatched"):
             getattr(self, attr).setText("—")
 
@@ -2025,6 +2034,23 @@ class HarvestTab(QWidget):
         if clicked == all_btn:
             return False, parsed_records
         return None, parsed_records
+
+    def _set_marc_import_progress(
+        self,
+        value: int,
+        *,
+        state: str = "running",
+        visible: bool = True,
+    ) -> None:
+        """Update the MARC-only progress bar without touching harvest state."""
+        if not hasattr(self, "_marc_progress_bar"):
+            return
+
+        self._marc_progress_bar.setVisible(visible)
+        self._marc_progress_bar.setValue(max(0, min(100, int(value))))
+        self._marc_progress_bar.setProperty("state", state)
+        self._marc_progress_bar.style().unpolish(self._marc_progress_bar)
+        self._marc_progress_bar.style().polish(self._marc_progress_bar)
 
     def _import_marc_file(self):
         """Run the three-step MARC import pipeline for the currently selected file.
@@ -2232,8 +2258,8 @@ class HarvestTab(QWidget):
             return
         source_name = source_name.strip() or default_source
 
-        self.marc_import_started.emit()
         self._btn_import_marc.setEnabled(False)
+        self._set_marc_import_progress(5)
         self._marc_hint_label.setText("Step 1/3 - Reading MARC file...")
         QApplication.processEvents()
 
@@ -2242,35 +2268,18 @@ class HarvestTab(QWidget):
         except Exception as exc:
             self._marc_hint_label.setText("Could not read the MARC file. Make sure it is a valid .mrc or .xml file.")
             self._btn_import_marc.setEnabled(True)
-            self.marc_import_finished.emit(
-                False,
-                {
-                    "error": "Could not read the MARC file",
-                    "found": 0,
-                    "failed": 0,
-                    "skipped": 0,
-                    "invalid": 0,
-                },
-            )
+            self._set_marc_import_progress(100, state="error")
             return
 
         total_records = len(records)
         if total_records == 0:
             self._marc_hint_label.setText("No records found in the MARC file.")
             self._btn_import_marc.setEnabled(True)
-            self.marc_import_finished.emit(
-                False,
-                {
-                    "error": "No records found in the MARC file",
-                    "found": 0,
-                    "failed": 0,
-                    "skipped": 0,
-                    "invalid": 0,
-                },
-            )
+            self._set_marc_import_progress(100, state="error")
             return
 
         self._marc_hint_label.setText(f"Step 2/3 - Processing {total_records:,} records...")
+        self._set_marc_import_progress(30)
         QApplication.processEvents()
 
         config = {}
@@ -2327,16 +2336,7 @@ class HarvestTab(QWidget):
         if replace_existing_source is None:
             self._btn_import_marc.setEnabled(True)
             self._marc_hint_label.setText("Import cancelled.")
-            self.marc_import_finished.emit(
-                False,
-                {
-                    "cancelled": True,
-                    "found": 0,
-                    "failed": 0,
-                    "skipped": 0,
-                    "invalid": 0,
-                },
-            )
+            self._set_marc_import_progress(100, state="error")
             return
 
         marc_service = MarcImportService(
@@ -2377,29 +2377,23 @@ class HarvestTab(QWidget):
                     self._marc_hint_label.setText(
                         f"Step 2/3 - Processed {i:,} / {total_records:,}..."
                     )
+                    if selected_rows:
+                        self._set_marc_import_progress(30 + int((i / len(selected_rows)) * 50))
                     QApplication.processEvents()
 
         self._marc_hint_label.setText("Step 3/3 - Finalizing TSV export...")
+        self._set_marc_import_progress(90)
         QApplication.processEvents()
         self._marc_hint_label.setText(
             f"Done - {db_summary.main_rows:,} saved to database, {written:,} exported, "
             f"{skipped:,} skipped -> {out_path.name}"
         )
+        self._set_marc_import_progress(100, state="success")
         self._marc_stat_records.setText(f"{total_records:,}")
         self._marc_stat_callnums.setText(f"{written:,}")
         self._marc_stat_matched.setText(f"{db_summary.main_rows:,}")
         self._marc_stat_unmatched.setText(f"{skipped + db_summary.skipped_records:,}")
         self._btn_import_marc.setEnabled(True)
-        self.marc_import_finished.emit(
-            True,
-            {
-                "found": db_summary.main_rows,
-                "failed": 0,
-                "skipped": skipped + db_summary.skipped_records,
-                "invalid": 0,
-                "marc_import": True,
-            },
-        )
 
         mode_label = {"lccn": "LCCN Only", "nlmcn": "NLM Only", "both": "Both (LCCN & NLM)"}.get(mode, mode)
         summary_lines = [
