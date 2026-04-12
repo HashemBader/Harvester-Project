@@ -112,3 +112,50 @@ def test_harvest_tab_marc_import_prepares_and_persists_selected_mode(tmp_path):
     assert stored is not None
     assert stored.lccn == "QA76.76 C65 2004"
     assert stored.lccn_source == "Manual MARC Import"
+
+
+def test_marc_import_preparation_rejects_invalid_nlm_call_numbers():
+    selected_rows, parsed_records, written, skipped, no_isbn = _prepare_marc_import_records(
+        [
+            ("0126575126", None, "2003 C-159"),
+            ("9780596007973", None, "W 26.5"),
+        ],
+        mode="nlmcn",
+        source_name="Manual MARC Import",
+    )
+
+    assert selected_rows == [("9780596007973", None, "W 26.5")]
+    assert [record.nlmcn for record in parsed_records] == ["W 26.5"]
+    assert written == 1
+    assert skipped == 1
+    assert no_isbn == 0
+
+
+def test_marc_import_persistence_does_not_store_invalid_nlm_in_main(tmp_path):
+    db_path = tmp_path / "marc_import_invalid_nlm.sqlite3"
+    service = MarcImportService(db_path)
+
+    summary = service.persist_records(
+        [
+            service.parse_json_record(
+                {
+                    "fields": [
+                        {"020": {"subfields": [{"a": "0126575126"}]}},
+                        {"060": {"subfields": [{"a": "2003"}, {"b": "C-159"}]}},
+                    ]
+                },
+                source_name="Elsevier",
+            )
+        ],
+        source_name="Elsevier",
+        import_date=20260411,
+        save_source_to_active_profile=False,
+    )
+
+    db = DatabaseManager(db_path)
+    assert summary.main_rows == 0
+    assert summary.attempted_rows == 1
+    assert db.get_main("0126575126") is None
+    attempted = db.get_attempted_for("0126575126", "Elsevier", "both")
+    assert attempted is not None
+    assert attempted.last_error == "MARC import record missing call number"

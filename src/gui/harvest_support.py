@@ -48,6 +48,7 @@ from src.harvester.orchestrator import HarvestCancelled
 from src.harvester.run_harvest import RunStats, parse_isbn_file, run_harvest
 from src.harvester.targets import create_target_from_config
 from src.utils import messages
+from src.utils.call_number_validators import validate_lccn, validate_nlmcn
 
 logger = logging.getLogger(__name__)
 
@@ -209,6 +210,8 @@ def _prepare_marc_import_records(
 
     for isbn, lccn, nlmcn in records:
         selected_lccn, selected_nlmcn = _select_marc_values_for_mode(lccn, nlmcn, normalized_mode)
+        selected_lccn = validate_lccn(selected_lccn) if selected_lccn else None
+        selected_nlmcn = validate_nlmcn(selected_nlmcn) if selected_nlmcn else None
 
         if normalized_mode == "nlmcn":
             keep = bool(selected_nlmcn)
