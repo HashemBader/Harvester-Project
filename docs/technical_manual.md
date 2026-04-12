@@ -1,549 +1,317 @@
-# Technical Manual — LCCN Harvester
+# Technical Manual
 
-Developer-facing reference covering architecture, source groups, pipeline flow, database schema, configuration, utilities, and maintenance.
+This document is the developer-facing reference for the current LCCN Harvester codebase.
 
 ---
 
 ## Architecture Overview
 
-LCCN Harvester is a Python desktop application built with **PyQt6**. It follows a layered architecture:
+LCCN Harvester is a layered Python application built around a PyQt6 GUI and a shared SQLite database.
 
-```
-┌─────────────────────────────────────────────┐
-│                 GUI Layer                   │
-│  ModernMainWindow → Dashboard / Configure / │
-│  Harvest / Help  (src/gui/)                 │
-├─────────────────────────────────────────────┤
-│             Harvester Layer                 │
-│  HarvestOrchestrator → Targets → APIs/Z39.50│
-│  (src/harvester/)                           │
-├─────────────────────────────────────────────┤
-│             Database Layer                  │
-│  DatabaseManager → SQLite per profile       │
-│  (src/database/)                            │
-├─────────────────────────────────────────────┤
-│             Utilities                       │
-│  ISBN / LCCN / NLMCN validators, MARC parser│
-│  (src/utils/)                               │
-└─────────────────────────────────────────────┘
+```text
+GUI (src/gui/)
+  ModernMainWindow
+  Dashboard / Configure / Harvest / Help
+
+Harvest Runtime (src/harvester/)
+  run_harvest.py
+  orchestrator.py
+  targets.py
+  marc_import.py
+
+Storage (src/database/)
+  db_manager.py
+  schema.sql
+
+Configuration (src/config/)
+  profile_manager.py
+  app_paths.py
+
+Utilities (src/utils/, src/z3950/, src/api/)
+  validators, parsers, target persistence, API clients, Z39.50 support
 ```
 
-### Entry Points
+---
+
+## Entry Points
 
 | File | Purpose |
 |------|---------|
-| `app_entry.py` | Main entry point — handles PyInstaller frozen builds and development mode |
-| `src/gui_launcher.py` | Alternative IDE launch entry |
-| `src/harvester_cli.py` | Command-line interface (scripting / headless use) |
+| `app_entry.py` | Primary GUI entry point for source and frozen runs |
+| `src/gui_launcher.py` | Alternate development launcher |
+| `src/harvester_cli.py` | Command-line harvest utility |
+| `src/main.py` | `python -m src` shim for the CLI |
 
 ---
 
-## GUI Layer (`src/gui/`)
+## Runtime Paths
 
-The GUI is built with PyQt6. The main window class is `ModernMainWindow` in `modern_window.py`.
+In development, runtime files live beside the repository. In frozen builds, `src/config/app_paths.py` redirects writable data to the platform-specific user-data directory unless the app is being run from a local build inside the workspace.
 
-### Main Window (`modern_window.py`)
+Current layout:
 
-- Renders a collapsible left sidebar (240 px expanded, 72 px collapsed) with animated transition.
-- Hosts a `QStackedWidget` with four pages: Dashboard, Configure, Harvest, Help.
-- Manages cross-tab signal wiring (harvest events → dashboard updates).
-- Handles keyboard shortcuts, theme switching, system-tray notifications, and profile management.
-- Minimum window size: 900 × 660 px.
+```text
+config/
+  active_profile.txt
+  default_profile.json
+  profiles/
+    <slug>/
+      <slug>.json
+      <slug>_targets.tsv
 
-### Tab Modules
-
-| File | Class | Responsibility |
-|------|-------|---------------|
-| `dashboard.py` | `DashboardTab` | KPI cards, live activity monitor, recent results table, profile selector |
-| `targets_config_tab.py` | `TargetsConfigTab` | Container for Targets and Settings sub-tabs; profile change signals |
-| `targets_tab.py` | `TargetsTab` | Editable target list with enable/disable and priority reordering |
-| `config_tab.py` | `ConfigTab` | Profile CRUD, retry interval spinbox, call number mode selector |
-| `harvest_tab.py` | `HarvestTab` | File input drop zone, harvest controls, MARC import, output file links |
-| `help_tab.py` | `HelpTab` | Keyboard shortcut reference, accessibility info, about section |
-
-### Theming
-
-- Two palettes: `CATPPUCCIN_DARK` and `CATPPUCCIN_LIGHT` (defined in `styles.py`).
-- `ThemeManager` (`theme_manager.py`) persists the selected theme across sessions.
-- `generate_stylesheet(colors)` produces a full Qt stylesheet from a palette dict.
-- All tabs that use inline styles implement `refresh_theme(colors)` for live switching.
-
-### Icons
-
-`icons.py` provides all SVG icons as string constants and caches rendered `QIcon` / `QPixmap` objects by `(svg, color, size)`.
-
----
-
-## Harvester Layer (`src/harvester/`)
-
-### Orchestrator (`orchestrator.py`)
-
-`HarvestOrchestrator` manages the per-ISBN harvest pipeline:
-
-1. **Cache check** — if the ISBN is already in `main`, emit `cached` and skip.
-2. **Linked ISBN check** — if a sibling ISBN is in `main`, reuse its result (`linked_cached`).
-3. **Retry gate** — for each target, skip if `(isbn, target)` was attempted within the retry window.
-4. **Target loop** — query each enabled target in rank order; stop on first success.
-5. **Success write** — insert into `main`; emit `success`.
-6. **Failure write** — all targets failed; insert into `attempted`; emit `failed`.
-
-Supports parallel ISBN processing via `ThreadPoolExecutor`. Raises `HarvestCancelled` when the caller's cancel check returns `True`.
-
-### Run Harvest (`run_harvest.py`)
-
-`run_harvest()` is the top-level function called by `HarvestWorker`. It:
-
-- Reads and validates ISBNs from the input file via `parse_isbn_file()`.
-- Creates a `DatabaseManager` for the active profile.
-- Instantiates enabled targets from configuration.
-- Delegates per-ISBN work to `HarvestOrchestrator`.
-- Returns a `HarvestSummary` with aggregate counts.
-
-### Targets (`targets.py`, `api_targets.py`, `z3950_targets.py`)
-
-Each target implements the `HarvestTarget` protocol:
-
-```python
-class HarvestTarget(Protocol):
-    name: str
-    def lookup(self, isbn: str) -> TargetResult: ...
+data/
+  gui_settings.json
+  lccn_harvester.sqlite3
+  <slug>/
+    <profile>-success-<timestamp>.tsv / .csv
+    <profile>-failed-<timestamp>.tsv / .csv
+    <profile>-invalid-<timestamp>.tsv / .csv
+    <profile>-problems-<timestamp>.tsv / .csv
+    <profile>-linked-isbns-<timestamp>.tsv / .csv
+    <profile>-marc-import-<timestamp>.tsv / .csv
 ```
 
-`TargetResult` carries: `success`, `lccn`, `nlmcn`, `source`, `isbns`, `error`.
+Key points:
 
-**API Targets** (`api_targets.py`):
-- `LOCTarget` — queries `https://www.loc.gov/search/?q=<isbn>&fo=json`
-- `HarvardTarget` — queries `https://api.lib.harvard.edu/`
-- `OpenLibraryTarget` — queries `https://openlibrary.org/`
-
-**Z39.50 Targets** (`z3950_targets.py`): connect to library catalog servers using the Z39.50 protocol via a pure-Python client (`src/z3950/`).
-
-`create_target_from_config(config_dict)` in `targets.py` instantiates the correct target class from a configuration dictionary.
-
-### MARC Import (`marc_import.py`)
-
-`MarcImportService` parses MARC records from files and returns `ParsedMarcImportRecord` objects. These are persisted to the database and written to the output TSV files, bypassing external target lookups.
+- The database is shared across profiles.
+- Profiles separate settings, targets, and output folders.
+- `gui_settings.json` stores theme and related GUI preferences.
+- Output files are timestamped, so runs do not overwrite one another.
 
 ---
 
-## Database Layer (`src/database/`)
+## GUI Layer
 
-SQLite — one database file per profile:
+`src/gui/modern_window.py` builds the main window and wires together the four primary pages.
 
-```
-data/<profile_name>/lccn_harvester.sqlite3
-```
+### Pages
 
-### DatabaseManager Key Methods (`db_manager.py`)
+| Module | Primary responsibility |
+|--------|------------------------|
+| `dashboard.py` | Run status, KPI cards, recent results, result-file access, linked-ISBN tools |
+| `targets_config_tab.py` | Combined `Configure` page container |
+| `targets_tab.py` | Target list editing and connectivity checks |
+| `config_tab.py` | Profile selection and harvest settings |
+| `harvest_tab.py` | Input preview, harvest controls, MARC import |
+| `help_tab.py` | Help links, shortcuts, and accessibility links |
 
-| Method | Purpose |
-|--------|---------|
-| `init_db()` | Creates tables from `schema.sql`; enables `PRAGMA foreign_keys = ON` |
-| `get_main(isbn)` | Look up a successfully harvested ISBN and collapse row-per-type storage into one combined record |
-| `upsert_main(record)` | Write a successful result into the `main` table |
-| `get_attempted_for(isbn, target, attempt_type)` | Read retry state for a specific ISBN/target/type combination |
-| `upsert_attempted(...)` | Write retry/failure state into the `attempted` table |
-| `get_lowest_isbn(isbn)` / `get_linked_isbns(lowest)` | Resolve canonical ISBNs and linked-edition rows |
-| `get_global_stats()` | Aggregate counts for Dashboard KPI cards |
+### Notable GUI behavior
 
-### Schema
-
-#### `main` — successful results
-
-The physical `main` table stores one row per `(isbn, call_number_type, source)`.
-`DatabaseManager.get_main()` combines those rows back into the familiar
-LCCN/NLMCN view used by the GUI and exports.
-
-| Column | Type | Notes |
-|--------|------|-------|
-| `isbn` | TEXT | Normalized, no hyphens |
-| `call_number` | TEXT | Stored call number value |
-| `call_number_type` | TEXT | `lccn` or `nlmcn` |
-| `classification` | TEXT | LoC class prefix, e.g. `QA` |
-| `source` | TEXT | Winning target name |
-| `date_added` | INTEGER | `yyyymmdd` integer |
-
-Primary key: `(isbn, call_number_type, source)`.
-
-#### `attempted` — failed attempts (retry support)
-
-| Column | Type | Notes |
-|--------|------|-------|
-| `isbn` | TEXT | |
-| `last_target` | TEXT | Target most recently tried for this row |
-| `attempt_type` | TEXT | `lccn`, `nlmcn`, or `both` |
-| `last_attempted` | INTEGER | `yyyymmdd` |
-| `fail_count` | INTEGER | Incremented on repeated failures for the same key |
-| `last_error` | TEXT | Most recent failure reason |
-
-Primary key: `(isbn, last_target, attempt_type)` — stores the latest attempt per retry key.
-
-#### `linked_isbns` — edition linking
-
-| Column | Type | Notes |
-|--------|------|-------|
-| `lowest_isbn` | TEXT | Canonical ISBN |
-| `other_isbn` | TEXT | Sibling edition ISBN |
-
-Primary key: `(lowest_isbn, other_isbn)`.
-
-#### `subjects`
-
-Not implemented in the shipped schema for this project branch. The subject-harvesting
-stretch goal was scoped out, so no `subjects` table is created or populated.
-
-### Date Storage
-
-All dates are stored as `yyyymmdd` integers (e.g., `20260404`). Helpers live in `src/database/date_utils.py`:
-
-- `today_yyyymmdd()` — returns today as int.
-- `yyyymmdd_to_iso_date(value)` — converts to `YYYY-MM-DD` string for display.
+- The app opens on the `Configure` page.
+- Theme selection is loaded from `ThemeManager`.
+- The system tray menu exposes `Show Window`, `Enable Notifications`, and `Quit`.
+- The dashboard database browser is read-only and supports search, source filtering, and pagination.
 
 ---
 
-## Configuration System (`src/config/`)
+## Profiles And Targets
 
-### ProfileManager (`profile_manager.py`)
+`ProfileManager` stores:
 
-Manages named profiles stored as JSON files under `data/profiles/`. Each profile file:
+- The active profile name in `config/active_profile.txt`
+- Profile settings in `config/profiles/<slug>/<slug>.json`
+- Per-profile targets in `config/profiles/<slug>/<slug>_targets.tsv`
 
-```json
-{
-  "retry_days": 7,
-  "call_number_mode": "lccn",
-  "stop_rule": "stop_either",
-  "both_stop_policy": "both",
-  "db_only": false
-}
-```
+`TargetsManager` persists the target list as TSV and ensures the built-in API targets are present.
 
-Key methods: `get_active_profile()`, `set_active_profile(name)`, `get_db_path(profile)`, `list_profiles()`, `save_profile(name, settings)`, `load_profile(name)`.
-
-### Profile Settings Reference
-
-| Key | Type | Values | Default |
-|-----|------|--------|---------|
-| `retry_days` | int | 0–365 | 7 |
-| `call_number_mode` | str | `lccn` / `nlmcn` / `both` | `lccn` |
-| `stop_rule` | str | `stop_either` / `stop_lccn` / `stop_nlmcn` | `stop_either` |
-| `both_stop_policy` | str | `both` / `either` | `both` |
-| `db_only` | bool | `true` / `false` | `false` |
+The GUI target editor is the main source of truth for target configuration. Built-in API targets and user-added Z39.50 targets are shown together in the same table.
 
 ---
 
-## Utilities (`src/utils/`)
+## Input Parsing
 
-| File | Responsibility |
-|------|---------------|
-| `isbn_validator.py` | `normalize_isbn()`, `validate_isbn()`, `pick_lowest_isbn()` |
-| `lccn_validator.py` | Validates call numbers against MARC 050 formatting |
-| `nlmcn_validator.py` | Validates call numbers against MARC 060 formatting |
-| `call_number_normalizer.py` | Strips non-standard characters from API-returned call numbers |
-| `marc_parser.py` | Reads XML/JSON responses; extracts MARC fields 050 and 060 |
-| `messages.py` | Centralises all user-facing status and error strings |
+`src/harvester/run_harvest.py` provides `parse_isbn_file()`.
 
----
+Supported formats:
 
-## Source Groups (SG1 – SG5)
+- `.tsv`
+- `.txt`
+- `.csv`
+- `.xlsx`
+- `.xls`
 
-The harvester assigns every target to a source group. The group is recorded in result metadata and used to route `db_only` mode.
+Parsing rules:
 
-| Group | Protocol | Status | Targets |
-|-------|----------|--------|---------|
-| **SG1** | REST APIs | Implemented | LOC, Harvard LibraryCloud, OpenLibrary |
-| **SG2** | Z39.50 | Implemented | Any configured Z39.50 catalog server |
-| **SG3** | SRU | Not implemented | — |
-| **SG4** | Other protocols | Not implemented | — |
-| **SG5** | Local DB (db_only) | Implemented | Shared SQLite database |
+- Column 0 is the primary ISBN.
+- Columns 1+ are linked ISBN variants.
+- Blank rows are skipped.
+- Rows beginning with `#` are skipped.
+- The first row is treated as a header when the first cell matches known ISBN labels.
+- Excel numeric ISBNs ending in `.0` are normalized before validation.
 
-### Why SG3 and SG4 Were Not Implemented
+The parser returns:
 
-SG3 (Search/Retrieve via URL — SRU) and SG4 (future protocols such as OAI-PMH or GraphQL) were reserved in the design but not built within the project scope. The architecture supports adding them without changes to the orchestrator or database layers.
-
-### Implementing SG3 — SRU Protocol
-
-SRU is a REST-based search protocol that returns MARCXML. Adding it follows the same pattern as SG1 API targets:
-
-1. Create a new class in `src/harvester/api_targets.py` (or a new `sru_targets.py`):
-
-   ```python
-   class SRUTarget:
-       name: str
-       source_group = "SG3"
-
-       def __init__(self, name: str, base_url: str):
-           self.name = name
-           self._base_url = base_url
-
-       def lookup(self, isbn: str) -> TargetResult:
-           url = f"{self._base_url}?operation=searchRetrieve&query=isbn={isbn}&recordSchema=marcxml"
-           # fetch URL, parse MARCXML using marc_parser.parse_marcxml_response()
-           # return TargetResult(success=..., lccn=..., nlmcn=..., source=self.name)
-   ```
-
-2. Register the new type in `create_target_from_config()` in `src/harvester/targets.py`:
-
-   ```python
-   if config["type"] == "sru":
-       return SRUTarget(name=config["name"], base_url=config["base_url"])
-   ```
-
-3. Add SRU entries to `data/targets.json` with `"type": "sru"`.
-
-4. `marc_parser.parse_marcxml_response()` already handles MARCXML — no parser changes are needed.
-
-### Implementing SG4 — Additional Protocols
-
-SG4 follows the same extension pattern. For any new protocol:
-
-1. Implement the `HarvestTarget` protocol in a new file under `src/harvester/`.
-2. Register it in `create_target_from_config()`.
-3. Assign `source_group = "SG4"` on the class.
-4. Add target entries to `data/targets.json`.
-
-No changes to `HarvestOrchestrator`, `DatabaseManager`, or the export layer are required.
+- Deduplicated valid ISBNs
+- Invalid ISBNs
+- Duplicate counts
+- Linked-ISBN mappings
 
 ---
 
-## Harvest Pipeline — Full Flow
+## Harvest Pipeline
 
-```
-Input TSV
-    │
-    ▼
-parse_isbn_file()
-    ├─ normalize ISBNs
-    ├─ deduplicate
-    └─ flag invalid → invalid output file
-    │
-    ▼
-For each unique valid ISBN:
-    │
-    ├─[cached?]──────────────────────────────► emit "cached"; write success row
-    │
-    ├─[linked_isbn cached?]──────────────────► emit "linked_cached"; write success row
-    │
-    └─[new / retry eligible]
-         │
-         For each target (in rank order):
-         │
-         ├─[retry gate: attempted within window?]─► skip this target → try next
-         │
-         ├─ target.lookup(isbn)
-         │      ├─[success]──────────────────────► parse MARC fields
-         │      │                                   insert main
-         │      │                                   emit "success"
-         │      │                                   stop target loop
-         │      └─[failure]──────────────────────► insert/update attempted
-         │                                          emit "attempt_failed"
-         │                                          continue to next target
-         │
-         └─[all targets failed]────────────────► emit "failed"
-    │
-    ▼
-HarvestSummary returned
-    │
-    ▼
-Write output files:
-    ├─ *_successful.tsv / .csv
-    ├─ *_failed.tsv / .csv
-    ├─ *_invalid.tsv / .csv
-    └─ *_problems.tsv / .csv
-```
+`run_harvest()` coordinates input parsing, database initialization, target creation, and orchestration.
+
+`HarvestOrchestrator` performs the per-ISBN runtime flow:
+
+1. Resolve the canonical ISBN if the input is already linked.
+2. Check the shared SQLite cache.
+3. In `db_only` mode, stop here if no cached result is available.
+4. Walk enabled targets in rank order.
+5. Apply call-number mode and stop-rule logic.
+6. Record successes in `main` and failed attempts in `attempted`.
+7. Record linked-ISBN relationships in `linked_isbns`.
+
+Progress events include:
+
+- `isbn_start`
+- `cached`
+- `linked_cached`
+- `target_start`
+- `success`
+- `linked_success`
+- `failed`
+- `skip_retry`
+- `attempt_failed`
+- `not_in_local_catalog`
+- `stats`
+- `db_flush`
+
+---
+
+## MARC Import
+
+`src/harvester/marc_import.py` persists MARC-derived records directly into the same database used by normal harvest runs.
+
+Current GUI-supported import formats:
+
+- Binary MARC21: `.mrc`, `.marc`
+- MARCXML: `.xml`
+
+Import behavior:
+
+- The GUI asks for a source name.
+- The active call-number mode determines which fields are kept.
+- Records with call numbers are written to `main`.
+- Records with ISBNs but no call numbers are written to `attempted`.
+- Records with no usable ISBN are skipped.
+- Linked ISBNs discovered during import are merged into the canonical ISBN structure.
 
 ---
 
 ## Output Files
 
-Each run overwrites the previous run's files. A `.csv` copy (UTF-8 with BOM, for Excel compatibility) is generated alongside each `.tsv`.
+Normal harvests write live TSV files during execution and generate CSV copies at the end.
 
-| Mode | Successful TSV Columns |
-|------|----------------------|
-| LCCN only | ISBN · LCCN · LCCN Source · Classification · Date |
-| NLMCN only | ISBN · NLM · NLM Source · Date |
-| Both | ISBN · LCCN · LCCN Source · Classification · NLM · NLM Source · Date |
+Output groups:
 
-Failed: `Call Number Type · ISBN · Target · Date Attempted · Reason`
+- success
+- failed
+- invalid
+- problems
+- linked-isbns
 
-Invalid: `ISBN`
+Successful output columns vary by mode:
 
-Problems: `Target · Problem`
+| Mode | Columns |
+|------|---------|
+| `lccn` | `ISBN`, `LCCN`, `LCCN Source`, `Classification`, `Date` |
+| `nlmcn` | `ISBN`, `NLM`, `NLM Source`, `Date` |
+| `both` | `ISBN`, `LCCN`, `LCCN Source`, `Classification`, `NLM`, `NLM Source`, `Date` |
 
----
-
-## Build and Run
-
-### Development Setup
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate    # macOS/Linux
-pip install -r requirements.txt
-python app_entry.py
-```
-
-### Running Tests
-
-```bash
-pytest          # all tests
-pytest -v       # verbose output
-pytest -k "db"  # run tests matching a pattern
-```
-
-### Packaging (PyInstaller)
-
-The build spec is in `.pyinstaller/`. To build on macOS:
-
-```bash
-bash build_mac.sh
-```
-
-To build on Windows:
-
-```bat
-build_windows.bat
-```
+The MARC import path writes a separate timestamped export file in the active profile folder.
 
 ---
 
-## Key Dependencies
+## Database Schema
 
-| Package | Purpose |
-|---------|---------|
-| `PyQt6` | Desktop GUI framework |
-| `requests` | HTTP client for SG1 API targets |
-| `pymarc` | MARC record parsing |
-| `pytest` | Test runner |
+`src/database/schema.sql` currently defines four tables:
 
----
+| Table | Purpose |
+|-------|---------|
+| `main` | Successful call-number rows |
+| `attempted` | Failed lookups, retry tracking, invalid ISBN tracking |
+| `linked_isbns` | Canonical ISBN mapping |
+| `marc_imports` | MARC import file metadata |
 
-## Extending the System
+### `main`
 
-### Adding a New API or Protocol Target
+Physical storage is one row per `(isbn, call_number_type, source)` combination.
 
-1. Create a class implementing the `HarvestTarget` protocol in `src/harvester/`.
-2. Register it in `create_target_from_config()` in `targets.py`.
-3. Add entries to `data/targets.json`.
+Key columns:
 
-### Extending the Database Schema
+- `isbn`
+- `call_number`
+- `call_number_type`
+- `classification`
+- `source`
+- `date_added`
 
-1. Edit `src/database/schema.sql`.
-2. Add migration logic to `init_db()` in `db_manager.py` (use `ALTER TABLE` or recreate the table as needed).
-3. Update `DatabaseManager` methods to read/write the new columns.
-4. Add corresponding tests in `tests/test_db.py`.
+### `attempted`
 
----
+Tracks retry state and failures by:
 
-## Maintenance Guide
+- `isbn`
+- `last_target`
+- `attempt_type`
+- `last_attempted`
+- `fail_count`
+- `last_error`
 
-### Routine Dependency Updates
+### `linked_isbns`
 
-```bash
-pip list --outdated
-pip install --upgrade <package>
-pytest   # verify nothing broke
-```
+Maps non-canonical ISBNs to a canonical lowest ISBN.
 
-Pin versions in `requirements.txt` after confirming tests pass.
+### `marc_imports`
 
-### Running the Test Suite
-
-```bash
-pytest -v
-```
-
-Key test files:
-
-| File | Covers |
-|------|--------|
-| `tests/test_isbn.py` | ISBN normalization and validation |
-| `tests/test_db.py` | Database operations |
-| `tests/test_orchestrator.py` | Harvest pipeline logic |
-| `tests/test_marc_import.py` | MARC import |
-| `tests/test_run_harvest_smoke.py` | End-to-end harvest smoke test |
-| `tests/test_profile_manager.py` | Profile CRUD |
-
-### Debugging API Target Issues
-
-1. Enable logging in `src/harvester/api_targets.py` to print raw responses.
-2. Test the endpoint URL directly in a browser or with `curl`.
-3. Check for `403 Forbidden` — usually a network/IP policy issue, not a bug.
-4. If a target consistently fails, disable it in **Configure → Targets** and investigate separately.
-
-### Debugging Z39.50 Connectivity
-
-1. Confirm the server hostname and port in `data/targets.json`.
-2. Test TCP connectivity: `nc -zv <host> <port>` (macOS/Linux).
-3. Check `src/z3950/client.py` logs for the raw APDU exchange.
-4. Increase the timeout value in the target configuration if the server is slow to respond.
-
-### Database Maintenance
-
-```bash
-# Open the database in the SQLite CLI
-sqlite3 data/<profile_name>/lccn_harvester.sqlite3
-
-# Reclaim space after large deletes
-VACUUM;
-
-# Check row counts
-SELECT COUNT(*) FROM main;
-SELECT COUNT(*) FROM attempted;
-
-# Backup
-cp data/<profile>/lccn_harvester.sqlite3 backup_$(date +%Y%m%d).sqlite3
-```
-
-Never commit `.sqlite3` files to the repository.
-
-### Adding or Updating a Z39.50 Target
-
-Edit `data/targets.json`. Each Z39.50 entry requires:
-
-```json
-{
-  "name": "My Library Z39.50",
-  "type": "z3950",
-  "host": "z3950.example.org",
-  "port": 210,
-  "db": "VOYAGER",
-  "enabled": true,
-  "rank": 10
-}
-```
-
-Restart the application for changes to take effect.
-
-### Packaging a New Release
-
-1. Run the full test suite: `pytest -v`
-2. Update the version string in `app_entry.py` and `docs/user_guide.md`.
-3. Build executables: `bash build_mac.sh` / `build_windows.bat`
-4. Smoke-test the built executable on a clean machine.
-5. Tag the release: `git tag v<version> && git push origin v<version>`
-
-### Common Issues and Resolutions
-
-| Issue | Likely Cause | Resolution |
-|-------|-------------|------------|
-| No results for any ISBN | All targets disabled or unreachable | Check **Configure → Targets**; verify network |
-| `CERTIFICATE_VERIFY_FAILED` | Outdated certifi | `pip install --upgrade certifi` |
-| Harvest stops at 0 ISBNs | Input file not TSV or ISBNs not in column 1 | Check file format |
-| Z39.50 target times out | Server slow or unreachable | Increase timeout; check host/port |
-| Database locked error | Another process has the DB open | Close other instances of the app |
+Tracks import-source metadata such as source name, file name, file hash, and import date.
 
 ---
 
-## Known Limitations
+## Database Browser
 
-- Subject phrases / `subjects` table — not implemented in this delivery.
-- Internationalization (French UI) — not implemented; UI strings are English-only.
-- SG3 (SRU) and SG4 (additional protocols) — reserved but not built; see the Source Groups section above for implementation guidance.
+`src/gui/database_browser_dialog.py` exposes a read-only browser for:
+
+- `main`
+- `attempted`
+- `linked_isbns`
+
+It loads tables lazily and supports:
+
+- Search
+- Source filtering where applicable
+- Pagination
+- Refresh
+
+It does not execute arbitrary SQL.
+
+---
+
+## Notifications And Accessibility
+
+`NotificationManager` supports tray or native notifications depending on platform availability.
+
+Accessibility-related notes live in:
+
+- `docs/WCAG_ACCESSIBILITY.md`
+- `docs/WCAG_SELF_CHECK_REPORT.md`
+
+The repository also includes `wcag_self_check.py`, which regenerates the report.
+
+---
+
+## Build And Packaging
+
+- `build_mac.sh` builds the macOS app bundle
+- `build_windows.bat` builds the Windows executable
+- Both use `LCCN_Harvester.spec`
+
+See [local_app_build_guide.md](local_app_build_guide.md) for the packaging workflow.
 
 ---
 
 ## See Also
 
-- [user_guide.md](user_guide.md) — How to use the application
-- [installation_guide.md](installation_guide.md) — Installation instructions
-- [contribution_guide.md](contribution_guide.md) — Developer setup and workflow
+- [user_guide.md](user_guide.md)
+- [cli_reference.md](cli_reference.md)
+- [contribution_guide.md](contribution_guide.md)

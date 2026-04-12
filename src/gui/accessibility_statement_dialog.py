@@ -22,45 +22,33 @@ from .styles import generate_stylesheet, CATPPUCCIN_DARK, CATPPUCCIN_LIGHT
 def load_accessibility_statement() -> str:
     """Read and return the accessibility statement Markdown text.
 
-    The preferred source is ``docs/wcag.md``. The legacy packaged path
-    ``docs/WCAG_ACCESSIBILITY.md`` is still supported so existing builds and
-    packaging rules continue to work without changes.
+    The preferred source is ``docs/WCAG_ACCESSIBILITY.md``.
     """
     # Determine the root directory of the project by going up 3 levels from this file
     root = Path(__file__).resolve().parent.parent.parent
 
-    # Define possible file locations (new preferred + legacy fallback)
-    statement_paths = [
-        root / "docs" / "wcag.md",
-        root / "docs" / "WCAG_ACCESSIBILITY.md",
-    ]
+    statement_path = root / "docs" / "WCAG_ACCESSIBILITY.md"
 
-    # Iterate through possible paths and return the first valid file found
-    for statement_path in statement_paths:
-        # Skip if the file does not exist
-        if not statement_path.exists():
-            continue
+    if statement_path.exists():
         try:
-            # Attempt to read the file contents using UTF-8 encoding
             return statement_path.read_text(encoding="utf-8")
         except Exception:
-            # If reading fails (e.g., permission issue), try the next path
-            continue
+            pass
 
     # Fallback content if no file could be loaded
     return (
         "# Accessibility Statement\n\n"
         "The accessibility statement file could not be loaded.\n\n"
-        "Expected file: `docs/wcag.md` or `docs/WCAG_ACCESSIBILITY.md`.\n"
+        "Expected file: `docs/WCAG_ACCESSIBILITY.md`.\n"
     )
 
 
 class AccessibilityStatementDialog(QDialog):
     """Modal dialog that renders the project's WCAG accessibility statement.
 
-    The statement is loaded from ``docs/wcag.md`` (or the legacy path
-    ``docs/WCAG_ACCESSIBILITY.md``) relative to the project root.  The dialog
-    is read-only and external hyperlinks inside the document open in the
+    The statement is loaded from ``docs/WCAG_ACCESSIBILITY.md`` relative to
+    the project root. The dialog is read-only and external hyperlinks inside
+    the document open in the
     default browser (``setOpenExternalLinks(True)``).
     """
 
