@@ -48,7 +48,7 @@ from PyQt6.QtWidgets import (
     QDialog,
     QCheckBox,
 )
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
 from PyQt6.QtCore import Qt, QTimer, QTime, pyqtSignal, QSize, QUrl
 from PyQt6.QtGui import QShortcut, QKeySequence, QColor, QBrush, QDesktopServices
 from pathlib import Path
@@ -759,6 +759,9 @@ class HarvestTab(QWidget):
 
         # Update is_running flag based on state
         self.is_running = state in (UIState.RUNNING, UIState.PAUSED)
+        input_controls_enabled = not self.is_running
+        self.btn_browse.setEnabled(input_controls_enabled)
+        self.btn_clear_file.setEnabled(input_controls_enabled and not self.btn_clear_file.isHidden())
 
         bg_color = "#181926"
         left_color = "#45475a"
@@ -908,16 +911,17 @@ class HarvestTab(QWidget):
         Args:
             path: Absolute path string, or empty/``None`` to clear the current file.
         """
+        if self.current_state in (UIState.RUNNING, UIState.PAUSED):
+            return
+
         if not path:
             self._clear_input()
             return
 
-        # If user picks a new file after a run, reset so the harvest button reappears
+        # If the user picks a new file after a run, reset only the harvest setup UI.
+        # Dashboard results stay visible until another harvest actually starts.
         if self.current_state in (UIState.COMPLETED, UIState.CANCELLED):
-            self.current_state = UIState.IDLE
-            self.btn_new_run.setVisible(False)
-            self.btn_start.setVisible(True)
-            self.btn_start.setEnabled(False)
+            self._clear_input(emit_reset=False)
 
         path_obj = Path(path)
 
@@ -1189,18 +1193,22 @@ class HarvestTab(QWidget):
 
         No-op while a harvest is actively running so we never disrupt live work.
         """
-        if self.current_state == UIState.RUNNING:
+        if self.current_state in (UIState.RUNNING, UIState.PAUSED):
             return
         self._clear_input()
 
-    def _clear_input(self):
+    def _clear_input(self, *args, emit_reset=True):
         """Reset all input-related UI controls and session state to a clean IDLE baseline.
 
         Clears the file path, File Statistics tiles, preview table, progress bar,
         and log label.  Forces QSS re-evaluation on dynamic-property widgets
         (``log_output``, ``lbl_val_invalid``, ``progress_bar``) via unpolish/polish.
-        Emits ``harvest_reset`` to notify the main window to reset the sidebar pill.
+        Emits ``harvest_reset`` to notify the main window to reset the sidebar pill
+        unless ``emit_reset`` is false.
         """
+        if self.current_state in (UIState.RUNNING, UIState.PAUSED):
+            return
+
         self.run_timer.stop()
         self.run_time = QTime(0, 0, 0)
         self.lbl_run_elapsed.setText("00:00:00")
@@ -1246,7 +1254,8 @@ class HarvestTab(QWidget):
         self.progress_bar.style().polish(self.progress_bar)
 
         self._transition_state(UIState.IDLE)
-        self.harvest_reset.emit()
+        if emit_reset:
+            self.harvest_reset.emit()
 
     def _set_invalid_state(self, filename, error_msg):
         """Display an error state when the loaded file contains no valid ISBNs.
@@ -1282,6 +1291,9 @@ class HarvestTab(QWidget):
 
     def _browse_file(self):
         """Open the system file picker and load the selected ISBN input file."""
+        if self.current_state in (UIState.RUNNING, UIState.PAUSED):
+            return
+
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select ISBN Input File",
@@ -1570,6 +1582,42 @@ class HarvestTab(QWidget):
                 if norm:
                     yield norm
 
+    @staticmethod
+    def _parse_retry_attempted_datetime(value):
+        """Parse retry-attempt storage formats into a datetime, or ``None``."""
+        if value in (None, ""):
+            return None
+        if isinstance(value, datetime):
+            return value.astimezone().replace(tzinfo=None) if value.tzinfo else value
+
+        text = str(value).strip()
+        if not text:
+            return None
+        if text.endswith(".0") and text[:-2].isdigit():
+            text = text[:-2]
+        if text.isdigit() and len(text) == 8:
+            return datetime(int(text[:4]), int(text[4:6]), int(text[6:8]))
+
+        try:
+            parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed.astimezone().replace(tzinfo=None) if parsed.tzinfo else parsed
+
+    @classmethod
+    def _format_retry_window_dates(cls, last_attempted, retry_days: int):
+        """Return display strings for the last-attempt and next retry dates."""
+        last_dt = cls._parse_retry_attempted_datetime(last_attempted)
+        if last_dt is None:
+            last_str = str(last_attempted) if last_attempted is not None else "Unknown"
+            return last_str, "Unknown"
+        try:
+            retry_days = int(retry_days or 0)
+        except Exception:
+            retry_days = 0
+        next_dt = last_dt + timedelta(days=retry_days)
+        return last_dt.strftime("%Y-%m-%d"), next_dt.strftime("%Y-%m-%d")
+
     def _check_recent_not_found_isbns(self, retry_days: int):
         """Warn the user when ISBNs in the input file are still within the retry window.
 
@@ -1627,25 +1675,7 @@ class HarvestTab(QWidget):
 
         details = []
         for isbn, att in recent:
-            last_attempted = att.last_attempted
-            try:
-                last_val = str(last_attempted) if last_attempted is not None else ""
-                if last_val.isdigit() and len(last_val) == 8:
-                    # Current storage format: yyyymmdd integer stored as text.
-                    last_dt = datetime(int(last_val[:4]), int(last_val[4:6]), int(last_val[6:8]), tzinfo=timezone.utc)
-                elif last_val:
-                    # Legacy storage format: ISO-8601 datetime string.
-                    last_dt = datetime.fromisoformat(last_val)
-                    if last_dt.tzinfo is None:
-                        last_dt = last_dt.replace(tzinfo=timezone.utc)
-                else:
-                    raise ValueError("empty")
-                next_dt = last_dt + timedelta(days=retry_days)
-                next_str = next_dt.astimezone().strftime("%Y-%m-%d")
-                last_str = last_dt.astimezone().strftime("%Y-%m-%d")
-            except Exception:
-                last_str = str(last_attempted) if last_attempted is not None else "Unknown"
-                next_str = "Unknown"
+            last_str, next_str = self._format_retry_window_dates(att.last_attempted, retry_days)
             details.append(
                 f"{isbn} | last not found: {last_str} | retry after: {next_str}"
             )
