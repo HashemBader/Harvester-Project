@@ -8,7 +8,7 @@ can therefore be used as a standalone script or imported without the full
 application stack.
 
 Output columns (defined by ``EXPORT_HEADER``):
-    ISBN, LCCN, NLMCN, Classification, Source, Date Added
+    ISBN, LCCN, NLMCN, Classification, NLM Classification, Source, Date Added
 
 The multi-row-per-ISBN storage format (one row per call_number_type/source)
 is collapsed into a single row per ISBN via SQL ``MAX()``/``GROUP BY``.
@@ -21,7 +21,15 @@ from pathlib import Path
 from typing import Union
 
 # Column names written as the first row of every exported TSV file.
-EXPORT_HEADER = ["ISBN", "LCCN", "NLMCN", "Classification", "Source", "Date Added"]
+EXPORT_HEADER = [
+    "ISBN",
+    "LCCN",
+    "NLMCN",
+    "Classification",
+    "NLM Classification",
+    "Source",
+    "Date Added",
+]
 
 
 def export_main_to_tsv(db_path: Union[str, Path], out_path: Union[str, Path]) -> Path:
@@ -66,6 +74,7 @@ def export_main_to_tsv(db_path: Union[str, Path], out_path: Union[str, Path]) ->
                 MAX(CASE WHEN call_number_type = 'lccn' THEN call_number END) AS lccn,
                 MAX(CASE WHEN call_number_type = 'nlmcn' THEN call_number END) AS nlmcn,
                 MAX(CASE WHEN call_number_type = 'lccn' THEN classification END) AS classification,
+                MAX(CASE WHEN call_number_type = 'nlmcn' THEN classification END) AS nlm_classification,
                 group_concat(DISTINCT source) AS source,
                 MAX(date_added) AS date_added
             FROM main

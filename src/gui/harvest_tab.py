@@ -1,9 +1,9 @@
 """Harvest execution page — input selection, run controls, and live progress display.
 
 ``HarvestTab`` is the main UI for starting and monitoring harvest runs.  It owns
-the run-setup card (input file, run mode, stop rule), the MARC Import card, the
-File Statistics card, the File Preview table, and the action bar (Start/Pause/
-Cancel buttons with a thin progress bar).
+the run-setup card (active profile label, input file, local run overrides), the
+MARC Import card, the File Statistics card, the File Preview table, and the
+action bar (Start/Pause/Cancel buttons with a thin progress bar).
 
 The actual harvesting work is done by ``HarvestWorker`` (defined in
 ``harvest_support.py``) which runs in a ``QThread``.  ``HarvestTab`` wires the
@@ -59,12 +59,12 @@ import hashlib
 import sys
 import json
 
-from .combo_boxes import ConsistentComboBox
 from .icons import SVG_HARVEST, SVG_INPUT, SVG_ACTIVITY
 from .input_tab import ClickableDropZone
 from .harvest_support import (
     DroppableGroupBox,
     HarvestWorker,
+    _extract_call_number_classification,
     _extract_lc_classification,
     _looks_like_header_cell,
     _prepare_marc_import_records,
@@ -217,6 +217,19 @@ class HarvestTab(QWidget):
         self._targets_getter = targets_getter
         self._profile_getter = profile_getter
         self._db_path_getter = db_path_getter
+        self._refresh_active_profile_label()
+
+    def _refresh_active_profile_label(self):
+        """Refresh the read-only profile label shown on the Harvest setup card."""
+        if not hasattr(self, "lbl_active_profile"):
+            return
+        profile_name = "Default Settings"
+        if self._profile_getter:
+            try:
+                profile_name = self._profile_getter() or profile_name
+            except Exception:
+                pass
+        self.lbl_active_profile.setText(f"Active profile: {profile_name}")
 
     def on_targets_changed(self, targets):
         """Re-evaluate the Start button state when the user changes target selections.
@@ -312,6 +325,11 @@ class HarvestTab(QWidget):
         setup_grid.setSpacing(6)
         setup_grid.setColumnStretch(1, 1)
 
+        self.lbl_active_profile = QLabel("Active profile: Default Settings")
+        self.lbl_active_profile.setProperty("class", "HelperText")
+        self.lbl_active_profile.setToolTip("Runs use the active profile's Configure settings.")
+        setup_grid.addWidget(self.lbl_active_profile, 0, 0, 1, 2)
+
         lbl_input = QLabel("Input file:")
         lbl_input.setProperty("class", "HelperText")
         file_input_layout = QHBoxLayout()
@@ -332,65 +350,25 @@ class HarvestTab(QWidget):
         file_input_layout.addWidget(self.file_path_edit)
         file_input_layout.addWidget(self.btn_clear_file)
         file_input_layout.addWidget(self.btn_browse)
-        setup_grid.addWidget(lbl_input, 0, 0)
-        setup_grid.addLayout(file_input_layout, 0, 1)
+        setup_grid.addWidget(lbl_input, 1, 0)
+        setup_grid.addLayout(file_input_layout, 1, 1)
 
-        lbl_run_mode = QLabel("Run Mode:")
-        lbl_run_mode.setProperty("class", "HelperText")
-        self.combo_run_mode = ConsistentComboBox()
-        self.combo_run_mode.setProperty("class", "ComboBox")
-        self.combo_run_mode.addItems(["LCCN Only", "NLM Only", "Both (LCCN & NLM)", "MARC Import Only"])
-        self.combo_run_mode.setToolTip("Select the type of call numbers to harvest")
-        if hasattr(self, "_config_getter") and callable(self._config_getter):
-            config = self._config_getter() or {}
-            saved_mode = config.get("call_number_mode", "lccn")
-            if saved_mode == "nlmcn":
-                self.combo_run_mode.setCurrentText("NLM Only")
-            elif saved_mode == "both":
-                self.combo_run_mode.setCurrentText("Both (LCCN & NLM)")
-            elif saved_mode == "marc_only":
-                self.combo_run_mode.setCurrentText("MARC Import Only")
-            else:
-                self.combo_run_mode.setCurrentText("LCCN Only")
-        else:
-            self.combo_run_mode.setCurrentText("LCCN Only")
-        setup_grid.addWidget(lbl_run_mode, 1, 0)
-        setup_grid.addWidget(self.combo_run_mode, 1, 1)
-
-        self.lbl_stop_rule = QLabel("Stop Rule:")
-        self.lbl_stop_rule.setProperty("class", "HelperText")
-        self.combo_stop_rule = ConsistentComboBox()
-        self.combo_stop_rule.setProperty("class", "ComboBox")
-        self.combo_stop_rule.addItems([
-            "Stop if either found",
-            "Stop if LCCN found",
-            "Stop if NLMCN found",
-            "Continue until both found",
-        ])
-        if hasattr(self, "_config_getter") and callable(self._config_getter):
-            saved_stop = config.get("stop_rule", "stop_either")
-            mapping = {
-                "stop_either": "Stop if either found",
-                "stop_lccn": "Stop if LCCN found",
-                "stop_nlmcn": "Stop if NLMCN found",
-                "continue_both": "Continue until both found",
-            }
-            self.combo_stop_rule.setCurrentText(mapping.get(saved_stop, "Stop if either found"))
-        setup_grid.addWidget(self.lbl_stop_rule, 2, 0)
-        setup_grid.addWidget(self.combo_stop_rule, 2, 1)
+        self.chk_marc_only = QCheckBox("MARC only for this run")
+        self.chk_marc_only.setToolTip(
+            "Use the active Configure rules and search only records already imported into the local database"
+        )
+        self.chk_marc_only.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.chk_marc_only.setMinimumHeight(32)
+        self.chk_marc_only.toggled.connect(self._on_marc_only_toggled)
+        setup_grid.addWidget(self.chk_marc_only, 2, 1)
 
         self.chk_db_only = QCheckBox("Database only for this run")
         self.chk_db_only.setToolTip("Skip APIs and Z39.50 targets and search only the existing SQLite database")
         self.chk_db_only.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.chk_db_only.setMinimumHeight(32)
+        self.chk_db_only.toggled.connect(self._on_db_only_toggled)
         setup_grid.addWidget(self.chk_db_only, 3, 1)
         self._apply_db_only_checkbox_style()
-
-        # Slot wiring: re-evaluate stop-rule visibility whenever the run mode or
-        # db-only flag changes.  The initial call ensures the correct muted/active
-        # style is applied before the first user interaction.
-        self.combo_run_mode.currentTextChanged.connect(self._toggle_stop_rule_visibility)
-        self.chk_db_only.toggled.connect(self._toggle_stop_rule_visibility)
-        self._toggle_stop_rule_visibility(self.combo_run_mode.currentText())
         input_layout.addLayout(setup_grid)
         input_layout.addStretch()
 
@@ -676,43 +654,6 @@ class HarvestTab(QWidget):
         layout.addWidget(action_frame)
 
         self._transition_state(UIState.IDLE)
-
-    def _toggle_stop_rule_visibility(self, mode_text=None):
-        """Show or hide (visually mute) the Stop Rule combo based on the current run mode.
-
-        The stop rule is only meaningful when mode is "Both (LCCN & NLM)" and the
-        DB-only checkbox is not checked.  In all other cases the combo is visually
-        muted (greyed out with a forbidden cursor) but still present in the layout.
-        """
-        if not mode_text:
-            mode_text = self.combo_run_mode.currentText()
-
-        is_both = mode_text == "Both (LCCN & NLM)"
-        db_only_for_run = getattr(self, "chk_db_only", None) is not None and self.chk_db_only.isChecked()
-        stop_rule_active = is_both and not db_only_for_run
-        self.lbl_stop_rule.setEnabled(True)
-        self.combo_stop_rule.setEnabled(stop_rule_active)
-
-        if stop_rule_active:
-            # Restore normal theme appearance
-            self.lbl_stop_rule.setStyleSheet("")
-            self.combo_stop_rule.setStyleSheet("")
-            self.combo_stop_rule.setCursor(Qt.CursorShape.ArrowCursor)
-        else:
-            # Visually mute — grey text, faded background, blocked cursor
-            muted_combo = (
-                "QComboBox {"
-                "  color: rgba(120, 120, 140, 0.55);"
-                "  background: rgba(100, 100, 120, 0.10);"
-                "  border: 1px solid rgba(120, 120, 140, 0.20);"
-                "  border-radius: 6px;"
-                "}"
-                "QComboBox::drop-down { border: none; }"
-                "QComboBox::down-arrow { opacity: 0.3; }"
-            )
-            self.lbl_stop_rule.setStyleSheet("")
-            self.combo_stop_rule.setStyleSheet(muted_combo)
-            self.combo_stop_rule.setCursor(Qt.CursorShape.ForbiddenCursor)
 
     def _confirm_db_only_without_targets(self) -> bool:
         """Ask the user to confirm running with no targets (database-only mode).
@@ -1102,15 +1043,42 @@ class HarvestTab(QWidget):
         """Apply a theme-aware text colour to the DB-only checkbox label.
 
         ``QCheckBox`` text colour can be overridden by global QSS rules that make it
-        invisible on certain themes; this method ensures the label is always readable
-        by reading the active theme from ``ThemeManager`` and applying an explicit
-        inline style.
+        invisible on certain themes; this method ensures the local-run option labels
+        are always readable by reading the active theme from ``ThemeManager`` and
+        applying an explicit inline style.
         """
         is_dark = ThemeManager().get_theme() == "dark"
         text_color = "#f9fafb" if is_dark else "#000000"
-        self.chk_db_only.setStyleSheet(
-            "QCheckBox { color: " + text_color + "; font-weight: 600; spacing: 8px; }"
+        style = (
+            "QCheckBox {"
+            "  color: " + text_color + ";"
+            "  font-size: 13px;"
+            "  font-weight: 700;"
+            "  spacing: 10px;"
+            "  padding: 5px 0;"
+            "}"
+            "QCheckBox::indicator {"
+            "  width: 16px;"
+            "  height: 16px;"
+            "}"
         )
+        for checkbox in (getattr(self, "chk_marc_only", None), getattr(self, "chk_db_only", None)):
+            if checkbox is not None:
+                checkbox.setStyleSheet(style)
+
+    def _on_marc_only_toggled(self, checked: bool):
+        """Keep MARC-only and database-only run overrides mutually exclusive."""
+        if checked and hasattr(self, "chk_db_only") and self.chk_db_only.isChecked():
+            self.chk_db_only.blockSignals(True)
+            self.chk_db_only.setChecked(False)
+            self.chk_db_only.blockSignals(False)
+
+    def _on_db_only_toggled(self, checked: bool):
+        """Keep database-only and MARC-only run overrides mutually exclusive."""
+        if checked and hasattr(self, "chk_marc_only") and self.chk_marc_only.isChecked():
+            self.chk_marc_only.blockSignals(True)
+            self.chk_marc_only.setChecked(False)
+            self.chk_marc_only.blockSignals(False)
 
     def _load_file_preview(self):
         """Populate the preview table with the first 20 valid ISBN rows from the input file.
@@ -1192,10 +1160,30 @@ class HarvestTab(QWidget):
         """Reset the harvest tab when the user switches profiles.
 
         No-op while a harvest is actively running so we never disrupt live work.
+        The selected input file is preserved for the current GUI session so the
+        user can pick a profile after choosing an ISBN file without reselecting it.
         """
         if self.current_state in (UIState.RUNNING, UIState.PAUSED):
             return
-        self._clear_input()
+        self._refresh_active_profile_label()
+        self.run_timer.stop()
+        self.run_time = QTime(0, 0, 0)
+        self.lbl_run_elapsed.setText("00:00:00")
+        self.timer_is_paused = False
+        self.processed_count = 0
+        self.total_count = 0
+        self.lbl_progress_text.setText("0 / 0")
+        self.progress_bar.setValue(0)
+        self.log_output.setText("Ready...")
+        self.log_output.setProperty("state", "idle")
+        self.log_output.style().unpolish(self.log_output)
+        self.log_output.style().polish(self.log_output)
+
+        if self.input_file and Path(self.input_file).exists():
+            self._check_start_conditions()
+        else:
+            self._clear_input(emit_reset=False)
+        self.harvest_reset.emit()
 
     def _clear_input(self, *args, emit_reset=True):
         """Reset all input-related UI controls and session state to a clean IDLE baseline.
@@ -1309,9 +1297,8 @@ class HarvestTab(QWidget):
         Steps performed:
         1. Retrieve the active profile config via ``_config_getter``.
         2. Query the DB for ISBNs still within the retry window (``_check_recent_not_found_isbns``).
-        3. Override ``config["call_number_mode"]`` from the UI combo so the run always
-           matches what the user sees on screen.
-        4. Map the stop-rule combo to internal ``stop_rule`` / ``both_stop_policy`` values.
+        3. Normalize ``call_number_mode`` from the active Configure profile.
+        4. Map the profile stop rule to internal ``stop_rule`` / ``both_stop_policy`` values.
         5. Check selected targets; show a confirmation if none are selected and the user
            opts to continue (DB-only mode).
         6. Call ``_start_worker``.
@@ -1334,8 +1321,12 @@ class HarvestTab(QWidget):
             )
             return
         
-        # Override call_number_mode based on UI selection
-        mode_text = self.combo_run_mode.currentText()
+        # Use Configure as the source of truth for call-number mode and stop rule.
+        configured_mode = (config.get("call_number_mode", "lccn") or "lccn").strip().lower()
+        mode_text = {
+            "nlmcn": "NLM Only",
+            "both": "Both (LCCN & NLM)",
+        }.get(configured_mode, "LCCN Only")
         if mode_text == "NLM Only":
             config["call_number_mode"] = "nlmcn"
             config["both_stop_policy"] = "nlmcn"
@@ -1343,7 +1334,12 @@ class HarvestTab(QWidget):
         elif mode_text == "Both (LCCN & NLM)":
             config["call_number_mode"] = "both"
             config["db_only"] = False
-            stop_text = self.combo_stop_rule.currentText()
+            saved_stop_rule = (config.get("stop_rule", "stop_either") or "stop_either").strip().lower()
+            stop_text = {
+                "stop_lccn": "Stop if LCCN found",
+                "stop_nlmcn": "Stop if NLMCN found",
+                "continue_both": "Continue until both found",
+            }.get(saved_stop_rule, "Stop if either found")
 
             # Read stop rule from the UI combo (no popup needed — user already chose)
             stop_mapping = {
@@ -1355,9 +1351,6 @@ class HarvestTab(QWidget):
             stop_rule_val, both_policy_val = stop_mapping.get(stop_text, ("stop_either", "either"))
             config["stop_rule"] = stop_rule_val
             config["both_stop_policy"] = both_policy_val
-        elif mode_text == "MARC Import Only":
-            config["call_number_mode"] = "both"
-            config["db_only"] = True
         else:
             config["call_number_mode"] = "lccn"
             config["both_stop_policy"] = "lccn"
@@ -1366,20 +1359,26 @@ class HarvestTab(QWidget):
         # 2. Get Targets
         targets = self._targets_getter() if self._targets_getter else []
         selected_targets = [t for t in targets if t.get("selected", True)]
+        explicit_marc_only = self.chk_marc_only.isChecked()
         explicit_db_only = self.chk_db_only.isChecked()
 
-        if not selected_targets:
+        if explicit_marc_only:
+            config["db_only"] = True
+            self.log_output.setText(
+                "MARC-only mode enabled for this run. Using the active profile rules."
+            )
+        elif explicit_db_only:
+            config["db_only"] = True
+            self.log_output.setText(
+                "Database-only mode enabled for this run. Skipping live targets."
+            )
+        elif not selected_targets:
             if not self._confirm_db_only_without_targets():
                 self.log_output.setText("Harvest cancelled: no targets selected.")
                 return
             config["db_only"] = True
             self.log_output.setText(
                 "No targets selected. Running against the existing database only."
-            )
-        elif explicit_db_only:
-            config["db_only"] = True
-            self.log_output.setText(
-                "Database-only mode enabled for this run. Skipping live targets."
             )
 
         # 3. Start Worker
@@ -2157,9 +2156,18 @@ class HarvestTab(QWidget):
         out_path = live_dir / f"{profile}-marc-import-{date_str}.tsv"
 
         if mode == "nlmcn":
-            headers = ["ISBN", "NLM", "NLM Source", "Date"]
+            headers = ["ISBN", "NLM", "NLM Source", "NLM Classification", "Date"]
         elif mode == "both":
-            headers = ["ISBN", "LCCN", "LCCN Source", "Classification", "NLM", "NLM Source", "Date"]
+            headers = [
+                "ISBN",
+                "LCCN",
+                "LCCN Source",
+                "Classification",
+                "NLM",
+                "NLM Source",
+                "NLM Classification",
+                "Date",
+            ]
         else:
             headers = ["ISBN", "LCCN", "LCCN Source", "Classification", "Date"]
 
@@ -2201,14 +2209,17 @@ class HarvestTab(QWidget):
             writer.writerow(headers)
             for i, (isbn, lccn, nlmcn) in enumerate(selected_rows, 1):
                 if mode == "nlmcn":
-                    row = [isbn or "", nlmcn, source_name, date_added]
+                    nlm_classification = _extract_call_number_classification(nlmcn or "")
+                    row = [isbn or "", nlmcn, source_name, nlm_classification, date_added]
                 elif mode == "both":
                     classification = _extract_lc_classification(lccn or "")
+                    nlm_classification = _extract_call_number_classification(nlmcn or "")
                     row = [
                         isbn or "",
                         lccn or "", source_name if lccn else "",
                         classification,
                         nlmcn or "", source_name if nlmcn else "",
+                        nlm_classification,
                         date_added,
                     ]
                 else:
@@ -2332,9 +2343,18 @@ class HarvestTab(QWidget):
         out_path = live_dir / f"{profile}-marc-import-{date_str}.tsv"
 
         if mode == "nlmcn":
-            headers = ["ISBN", "NLM", "NLM Source", "Date"]
+            headers = ["ISBN", "NLM", "NLM Source", "NLM Classification", "Date"]
         elif mode == "both":
-            headers = ["ISBN", "LCCN", "LCCN Source", "Classification", "NLM", "NLM Source", "Date"]
+            headers = [
+                "ISBN",
+                "LCCN",
+                "LCCN Source",
+                "Classification",
+                "NLM",
+                "NLM Source",
+                "NLM Classification",
+                "Date",
+            ]
         else:
             headers = ["ISBN", "LCCN", "LCCN Source", "Classification", "Date"]
 
@@ -2389,14 +2409,17 @@ class HarvestTab(QWidget):
             writer.writerow(headers)
             for i, (isbn, lccn, nlmcn) in enumerate(selected_rows, 1):
                 if mode == "nlmcn":
-                    row = [isbn or "", nlmcn, source_name, date_added]
+                    nlm_classification = _extract_call_number_classification(nlmcn or "")
+                    row = [isbn or "", nlmcn, source_name, nlm_classification, date_added]
                 elif mode == "both":
                     classification = _extract_lc_classification(lccn or "")
+                    nlm_classification = _extract_call_number_classification(nlmcn or "")
                     row = [
                         isbn or "",
                         lccn or "", source_name if lccn else "",
                         classification,
                         nlmcn or "", source_name if nlmcn else "",
+                        nlm_classification,
                         date_added,
                     ]
                 else:

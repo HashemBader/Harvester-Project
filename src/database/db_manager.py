@@ -37,6 +37,7 @@ from typing import Optional, Iterable, Sequence
 logger = logging.getLogger(__name__)
 
 from .date_utils import (
+    classification_from_call_number,
     classification_from_lccn,
     normalize_to_datetime_str,
     normalize_to_yyyymmdd_int,
@@ -45,6 +46,7 @@ from .date_utils import (
     yyyymmdd_to_iso_date,
 )
 from .records import AttemptedRecord, MainRecord
+from src.utils.call_number_validators import validate_nlmcn
 
 class DatabaseManager:
     """SQLite access layer for the LCCN Harvester's three core tables.
@@ -292,6 +294,7 @@ class DatabaseManager:
             self._migrate_attempted_schema_if_needed(conn)
             self._migrate_linked_isbns_schema_if_needed(conn)
             self._migrate_dates_to_yyyymmdd(conn)
+            self._repair_nlmcn_rows(conn)
 
     def _migrate_main_schema_if_needed(self, conn: sqlite3.Connection) -> None:
         """Migrate ``main`` to the multi-row-per-ISBN schema if the table is outdated.
@@ -590,6 +593,49 @@ class DatabaseManager:
                 len(rows_main), len(rows_att),
             )
 
+    def _repair_nlmcn_rows(self, conn: sqlite3.Connection) -> None:
+        """Remove invalid NLMCN rows and backfill classifications for valid ones.
+
+        Older databases may contain digit-leading or LC-style call numbers stored
+        as ``call_number_type='nlmcn'``.  Keep this repair at the database boundary
+        so all GUI, harvest, and MARC import paths converge on the same rule.
+        """
+        rows = conn.execute(
+            """
+            SELECT rowid, call_number, classification
+            FROM main
+            WHERE call_number_type = 'nlmcn'
+            """
+        ).fetchall()
+
+        repaired = 0
+        deleted = 0
+        for row in rows:
+            call_number = validate_nlmcn(row["call_number"])
+            if not call_number:
+                conn.execute("DELETE FROM main WHERE rowid = ?", (row["rowid"],))
+                deleted += 1
+                continue
+
+            classification = classification_from_call_number(call_number)
+            if row["call_number"] != call_number or row["classification"] != classification:
+                conn.execute(
+                    """
+                    UPDATE main
+                    SET call_number = ?, classification = ?
+                    WHERE rowid = ?
+                    """,
+                    (call_number, classification, row["rowid"]),
+                )
+                repaired += 1
+
+        if repaired or deleted:
+            logger.info(
+                "_repair_nlmcn_rows: repaired %d valid rows and deleted %d invalid rows",
+                repaired,
+                deleted,
+            )
+
     @contextmanager
     def transaction(self):
         """Open a transactional connection for use with batch ``*_many`` methods.
@@ -696,6 +742,8 @@ class DatabaseManager:
                 if nlmcn is None:
                     nlmcn = call_number
                     nlmcn_source = source
+                    if classification is None:
+                        classification = row["classification"] or classification_from_call_number(call_number)
 
         return MainRecord(
             isbn=isbn,
@@ -745,18 +793,19 @@ class DatabaseManager:
             )
         # If NLMCN is present, create a row for it
         if record.nlmcn:
-            rows.append(
-                (
-                    record.isbn,
-                    record.nlmcn,
-                    "nlmcn",
-                    # NLM call numbers don't have classifications
-                    None,
-                    # Use NLMCN-specific source or fall back to general source
-                    record.nlmcn_source or record.source or "",
-                    date_added,
+            nlmcn = validate_nlmcn(record.nlmcn)
+            if nlmcn:
+                rows.append(
+                    (
+                        record.isbn,
+                        nlmcn,
+                        "nlmcn",
+                        classification_from_call_number(nlmcn),
+                        # Use NLMCN-specific source or fall back to general source
+                        record.nlmcn_source or record.source or "",
+                        date_added,
+                    )
                 )
-            )
         # Return the list of tuples (may be 0, 1, or 2 elements)
         return rows
 
@@ -1588,7 +1637,10 @@ class DatabaseManager:
                     MAX(CASE WHEN call_number_type = 'lccn' THEN source END) AS lccn_source,
                     MAX(CASE WHEN call_number_type = 'nlmcn' THEN call_number END) AS nlmcn,
                     MAX(CASE WHEN call_number_type = 'nlmcn' THEN source END) AS nlmcn_source,
-                    MAX(CASE WHEN call_number_type = 'lccn' THEN classification END) AS classification,
+                    COALESCE(
+                        MAX(CASE WHEN call_number_type = 'lccn' THEN classification END),
+                        MAX(CASE WHEN call_number_type = 'nlmcn' THEN classification END)
+                    ) AS classification,
                     group_concat(DISTINCT source) AS source,
                     MAX(date_added) AS date_added
                 FROM main

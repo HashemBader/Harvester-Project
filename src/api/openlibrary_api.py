@@ -1,4 +1,4 @@
-"""
+﻿"""
 openlibrary_api.py
 
 OpenLibrary Books API client.
@@ -10,13 +10,18 @@ API endpoint
 ------------
 ``https://openlibrary.org/isbn/{isbn}.json``
 
+If that edition record has no usable classification, the client falls back to
+``https://openlibrary.org/api/books`` with the exact ISBN bibkey, because that
+endpoint can expose classification metadata for another OpenLibrary edition
+record tied to the same ISBN.
+
 The response is a JSON document representing the book edition.  Relevant fields:
 
-- ``lc_classifications`` (list of str) — LC Classification call numbers such as
+- ``lc_classifications`` (list of str) â€” LC Classification call numbers such as
   ``["QA76.73.J38 L43 2003"]``.  This is the primary target field.
-- ``classifications.lc_classifications`` — alternate nesting shape used by some
+- ``classifications.lc_classifications`` â€” alternate nesting shape used by some
   older edition records.
-- ``lccn`` / ``identifiers.lccn`` — LC *control* numbers (MARC 010), NOT
+- ``lccn`` / ``identifiers.lccn`` â€” LC *control* numbers (MARC 010), NOT
   LC classification call numbers (MARC 050).  These are intentionally ignored.
 
 A 404 response means the ISBN is genuinely absent from OpenLibrary and is
@@ -33,6 +38,7 @@ from __future__ import annotations
 import json
 import urllib.error
 import urllib.request
+import urllib.parse
 from typing import Any, Optional
 
 from src.api.base_api import ApiResult, BaseApiClient
@@ -62,11 +68,60 @@ class OpenLibraryApiClient(BaseApiClient):
     source_name = "openlibrary"
     # Base URL for OpenLibrary ISBN edition lookups
     base_url = "https://openlibrary.org/isbn"
+    books_api_url = "https://openlibrary.org/api/books"
 
     @property
     def source(self) -> str:
         # Return the source identifier for this API client
         return self.source_name
+
+    def _request_json(self, url: str) -> Any:
+        """Fetch a JSON document from OpenLibrary using the standard headers."""
+        req = urllib.request.Request(url)
+        req.add_header("User-Agent", "LCCNHarvester/0.1 (edu)")
+
+        with urlopen_with_ca(req, timeout=self.timeout_seconds) as resp:
+            if resp.status != 200:
+                raise Exception(f"HTTP {resp.status}")
+            return json.load(resp)
+
+    def _fetch_edition(self, isbn: str) -> Any:
+        """Fetch the direct ISBN edition record, returning ``None`` for 404."""
+        try:
+            return self._request_json(f"{self.base_url}/{isbn}.json")
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                return None
+            raise
+
+    def _fetch_books_api_data(self, isbn: str) -> Any:
+        """Fetch exact-ISBN Books API metadata and return the inner bibkey payload."""
+        query = urllib.parse.urlencode(
+            {
+                "bibkeys": f"ISBN:{isbn}",
+                "format": "json",
+                "jscmd": "data",
+            }
+        )
+        payload = self._request_json(f"{self.books_api_url}?{query}")
+        if not isinstance(payload, dict):
+            return None
+        return payload.get(f"ISBN:{isbn}") or None
+
+    @staticmethod
+    def _has_call_number_candidate(payload: Any) -> bool:
+        """Return whether a raw OpenLibrary payload includes classification fields."""
+        if not isinstance(payload, dict):
+            return False
+        if payload.get("lc_classifications") or payload.get("nlm_classifications"):
+            return True
+        classifications = payload.get("classifications")
+        if isinstance(classifications, dict):
+            return bool(
+                classifications.get("lc_classifications")
+                or classifications.get("nlm_classifications")
+            )
+        return False
 
     def fetch(self, isbn: str) -> Any:
         """
@@ -90,27 +145,17 @@ class OpenLibraryApiClient(BaseApiClient):
         Exception
             For network-level failures.
         """
-        # Construct the URL for this ISBN's edition page
-        url = f"{self.base_url}/{isbn}.json"
-        # Create a request object
-        req = urllib.request.Request(url)
-        # Add a user agent header to identify ourselves to the API
-        req.add_header("User-Agent", "LCCNHarvester/0.1 (edu)")
+        # Fetch edition first, then the exact-ISBN Books API if needed.
+        edition_payload = self._fetch_edition(isbn)
+        if self._has_call_number_candidate(edition_payload):
+            return edition_payload
 
-        try:
-            # Execute the request using the CA-aware HTTP utility
-            with urlopen_with_ca(req, timeout=self.timeout_seconds) as resp:
-                # Verify successful response
-                if resp.status != 200:
-                    raise Exception(f"HTTP {resp.status}")
-                # Parse and return the JSON response
-                return json.load(resp)
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                # 404 means the ISBN is genuinely not in OpenLibrary — not a network error.
-                return None
-            # Re-raise other HTTP errors (5xx, etc.)
-            raise
+        books_payload = self._fetch_books_api_data(isbn)
+        if books_payload is not None:
+            return books_payload
+
+        return edition_payload
+
 
     def _extract_isbns(self, payload: Any) -> list[str]:
         """
@@ -193,7 +238,7 @@ class OpenLibraryApiClient(BaseApiClient):
               ``lc_classifications`` field is absent/empty, or the extracted
               value fails validation.
         """
-        # Handle 404 — ISBN not in OpenLibrary
+        # Handle 404 â€” ISBN not in OpenLibrary
         if payload is None:
             return ApiResult(
                 isbn=isbn,
@@ -211,11 +256,19 @@ class OpenLibraryApiClient(BaseApiClient):
         if isinstance(lccs, list) and lccs:
             lccn = str(lccs[0]).strip() or None
 
+        nlmcs = payload.get("nlm_classifications", [])
+        if isinstance(nlmcs, list) and nlmcs:
+            nlmcn = str(nlmcs[0]).strip() or None
+
         # Alternate nesting shape used by some older OL edition records.
         if not lccn and isinstance(payload.get("classifications"), dict):
             alt = payload["classifications"].get("lc_classifications", [])
             if isinstance(alt, list) and alt:
                 lccn = str(alt[0]).strip() or None
+        if not nlmcn and isinstance(payload.get("classifications"), dict):
+            alt = payload["classifications"].get("nlm_classifications", [])
+            if isinstance(alt, list) and alt:
+                nlmcn = str(alt[0]).strip() or None
 
         # Note: OpenLibrary's top-level "lccn" field and identifiers.lccn are
         # LC control numbers (MARC 010, e.g. "2001016794"), NOT LC classification
@@ -240,7 +293,7 @@ class OpenLibraryApiClient(BaseApiClient):
                 isbns=isbns,
             )
 
-        # No usable call number found — treat as not_found for harvester purposes.
+        # No usable call number found â€” treat as not_found for harvester purposes.
         return ApiResult(
             isbn=isbn,
             source=self.source,
