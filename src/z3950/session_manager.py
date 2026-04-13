@@ -46,15 +46,21 @@ def validate_connection(host: str, port: int, timeout: int = 5, silent: bool = F
             network error (timeout, refused connection, DNS failure, etc.).
     """
     try:
-        # socket.create_connection handles DNS resolution and IPv4/IPv6
-        # selection automatically.  The context manager closes the socket
-        # immediately after the handshake — we only need to know it succeeded.
+        # socket.create_connection is a high-level function that:
+        # 1. Resolves the hostname (DNS lookup)
+        # 2. Attempts a TCP handshake
+        # 3. Supports both IPv4 and IPv6 automatically.
+        #
+        # The context manager ('with' statement) ensures the socket is closed 
+        # immediately after the handshake attempt is completed.
         with socket.create_connection((host, int(port)), timeout=timeout):
+            # If the code reaches here, the handshake was successful.
             return True
     except (socket.timeout, socket.error, ValueError) as e:
-        # ValueError is caught to handle invalid port values (e.g. non-numeric
-        # strings) that slip past the int() cast if port is already an int but
-        # the host string is malformed in a way that triggers a socket error.
+        # ValueError is caught specifically to handle cases where 'port' is not 
+        # a valid integer (e.g. was read as an empty or malformed string from config).
+        # socket.timeout and socket.error catch standard network failures.
         if not silent:
+            # Log a warning to help troubleshoot if validation fails.
             logging.warning(f"Connection validation failed for {host}:{port} - {e}")
         return False

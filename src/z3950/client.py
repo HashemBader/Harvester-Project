@@ -20,6 +20,7 @@ Typical usage::
 import logging
 from typing import List, Optional, Generator, TYPE_CHECKING, Any
 
+# Ensure PyZ3950 is importable and apply necessary regex hotfixes for Python 3.11+
 from src.z3950.pyz3950_compat import ensure_pyz3950_importable
 
 # TYPE_CHECKING guard: these imports exist only for static analysis tools
@@ -66,12 +67,15 @@ class Z3950Client:
             encoding (str): The encoding to use for records (default: utf-8).
             timeout (int): Socket timeout in seconds for the connection (default: 5).
         """
+        # Store connection parameters for later use in the connect() method
         self.host = host
         self.port = port
         self.database = database
         self.syntax = syntax
         self.encoding = encoding
         self.timeout = timeout
+        
+        # This will hold the active connection object once connect() is called
         self.conn = None
         self.logger = logging.getLogger(__name__)
 
@@ -93,10 +97,13 @@ class Z3950Client:
                 any other reason (wraps the original exception message).
         """
         try:
+            # Check if PyZ3950 is available and functional (includes regex hotfix)
             ok, reason = ensure_pyz3950_importable()
             if not ok:
                 raise RuntimeError(f"PyZ3950 import failed: {reason}")
+                
             # Lazy import to avoid import errors when PyZ3950 is missing/broken
+            # Importing here ensures the module is only loaded when needed.
             from PyZ3950 import zoom  # type: ignore
 
             self.logger.info(f"Connecting to {self.host}:{self.port}/{self.database}")
@@ -105,8 +112,13 @@ class Z3950Client:
             # Snapshot the current global timeout so it can be restored after
             # the connection attempt, even if an exception is raised.
             old_timeout = socket.getdefaulttimeout()
+            
+            # Set the timeout globally for the socket module during the connection attempt.
+            # This is necessary because some underlying libraries use the global default.
             socket.setdefaulttimeout(self.timeout)
             try:
+                # Initialize the ZOOM connection with the specified parameters.
+                # This performs the network handshake and protocol-level initialization.
                 self.conn = zoom.Connection(
                     self.host,
                     self.port,
@@ -119,6 +131,7 @@ class Z3950Client:
                 # accidentally leaving a short timeout for the rest of the app.
                 socket.setdefaulttimeout(old_timeout)
         except Exception as e:
+            # Log the full exception but wrap it in a cleaner ConnectionError for the caller.
             self.logger.error(f"Failed to connect to {self.host}:{self.port} - {e}")
             raise ConnectionError(f"Could not connect to Z39.50 server: {e}")
 
@@ -145,6 +158,7 @@ class Z3950Client:
             Exception: Re-raises any exception thrown by the ZOOM search call so
                 the caller can decide how to handle server-level errors.
         """
+        # Ensure we have an active connection before attempting a search.
         if not self.conn:
             raise ConnectionError("Not connected to server. Call connect() first.")
 
@@ -166,7 +180,9 @@ class Z3950Client:
 
         try:
             self.logger.info(f"Searching for ISBN: {clean_isbn}")
+            # Execute the search and get back a result set.
             res = self.conn.search(query)
+            # Process the raw results into pymarc Record objects.
             return self._process_results(res)
         except Exception as e:
             self.logger.error(f"Search failed for ISBN {isbn} - {e}")
@@ -184,10 +200,14 @@ class Z3950Client:
         """
         if self.conn:
             try:
+                # Close the connection protocol-wise and release socket resources.
                 self.conn.close()
             except Exception as e:
+                # Log any errors during closure but don't re-raise to avoid masking 
+                # other errors during cleanup.
                 self.logger.warning(f"Error closing connection: {e}")
             finally:
+                # Ensure the connection handle is cleared regardless of success.
                 self.conn = None
 
     def _process_results(self, result_set) -> list:
@@ -208,7 +228,7 @@ class Z3950Client:
           byte to ``'a'`` (UTF-8 indicator) ensures ``force_utf8=True`` takes
           effect uniformly and avoids ``UnicodeDecodeError`` exceptions.
         * **Broken upstream records**: Individual parse failures are caught and
-          logged at DEBUG level so a single malformed server record does not
+        * logged at DEBUG level so a single malformed server record does not
           abort the entire result set.
 
         Args:
@@ -226,6 +246,7 @@ class Z3950Client:
 
         records = []
         try:
+            # Iterate through all results found in the set.
             for res in result_set:
                 # PyZ3950 exposes the raw MARC payload via the .data attribute.
                 raw_data = res.data
@@ -233,7 +254,8 @@ class Z3950Client:
                     # Some PyZ3950 (Python 3 port) builds decode the payload to
                     # a str.  Re-encode it so pymarc always receives bytes.
                     if isinstance(raw_data, str):
-                        raw_data = raw_data.encode('utf-8')  # Best guess; MARC-8 data decoded as latin-1 may be mangled but avoids a crash
+                        # Use UTF-8 as a safe default for re-encoding.
+                        raw_data = raw_data.encode('utf-8')
 
                     try:
                         # MARC leader offset 9 signals the character coding scheme:
@@ -245,12 +267,15 @@ class Z3950Client:
                         if len(raw_data) >= 24 and raw_data[9:10] != b'a':
                             raw_data = raw_data[:9] + b'a' + raw_data[10:]
 
+                        # Attempt to parse the record data into a pymarc.Record object.
+                        # We use force_utf8=True to ensure we decode correctly whenever possible.
                         record = Record(data=raw_data, force_utf8=True, utf8_handling='replace')
                         records.append(record)
                     except Exception as parse_error:
                         # Only log at debug level so we don't spam the console for naturally broken upstream records
                         self.logger.debug(f"Failed to parse MARC record: {parse_error}")
         except Exception as e:
+            # Catch errors in the iteration process itself (e.g. network disconnection mid-stream).
             self.logger.error(f"Error iterating result set: {e}")
 
         return records
