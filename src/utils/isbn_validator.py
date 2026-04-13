@@ -45,24 +45,27 @@ from typing import Iterable
 import re
 
 try:
+    # Attempt to import the external 'stdnum' library for professional-grade ISBN validation.
     from stdnum import isbn as _stdnum_isbn
 except ImportError:
     # stdnum not installed — the fallback implementations below will be used.
+    # This ensures the project remains functional even without the dependency.
     STDNUM_AVAILABLE = False
     stdnum_isbn = None
 else:
+    # Package is available; set the global flag to use high-fidelity validation.
     STDNUM_AVAILABLE = True
     stdnum_isbn = _stdnum_isbn
 
 try:
     from . import messages
 except ImportError:
-    # Fallback when the module is used outside the package (e.g., standalone scripts).
+    # Simple fallback for the messages module when running in isolation.
     class messages:
         class GuiMessages:
             warn_title_invalid = "Invalid ISBN"
 
-# Path to the append-only log file for invalid ISBNs encountered at runtime.
+# Path to the append-only log file for tracking invalid ISBNs during harvest runs.
 INVALID_ISBN_LOG = Path("invalid_isbns.log")
 
 
@@ -78,22 +81,28 @@ def strip_isbn_qualifier(isbn_str: str | None) -> str:
     if not text:
         return ""
 
+    # Remove well-known prefixes like "ISBN-13: " or "ISBN : " case-insensitively.
     text = re.sub(r"^ISBN(?:-1[03])?\s*:?\s*", "", text, flags=re.IGNORECASE)
 
+    # Search for the first space or opening parenthesis, which usually signals the start of a qualifier.
     for match in re.finditer(r"\s+|\(", text):
         start = match.start()
+        # If it's a parenthesis (like "(cloth)"), we stop immediately.
         if text[start] == "(":
             return text[:start].strip()
 
+        # If it's a space, we check if the following text looks like a descriptive word or binding info.
         remainder = text[match.end() :].lstrip()
         if not remainder or remainder[0] in "(:;[" or remainder[0].isalpha():
             return text[:start].strip()
 
+    # If no obvious delimiters were found, return the whole (potentially cleaned) string.
     return text.strip()
 
 
 def _isbn_chars_only(isbn_str: str) -> str:
     """Return only ISBN characters, preserving a possible ISBN-10 ``X``."""
+    # Keep only digits and the letter X (ignoring case).
     return re.sub(r"[^0-9Xx]", "", isbn_str).upper()
 
 
@@ -101,8 +110,10 @@ def _cleaned_prefix_shape(candidate: str, length: int) -> bool:
     """Return True when the prefix has characters allowed for that ISBN length."""
     if len(candidate) != length:
         return False
+    # ISBN-13 is strictly 13 digits.
     if length == 13:
         return candidate.isdigit()
+    # ISBN-10 is 9 digits followed by a digit or 'X'.
     return candidate[:9].isdigit() and (candidate[9].isdigit() or candidate[9] == "X")
 
 
@@ -113,17 +124,23 @@ def _valid_isbn_prefix(isbn_str: str) -> str:
     ISBN.  After removing punctuation such as hyphens, the useful ISBN is the
     first 10 or 13 characters and everything after that is descriptive text.
     """
+    # Clean the input to just the raw character sequence.
     cleaned = _isbn_chars_only(strip_isbn_qualifier(isbn_str))
 
+    # Check for ISBN-13 first, then ISBN-10.
     for length in (13, 10):
         prefix = cleaned[:length]
+        # Skip if the first N characters don't even look like an ISBN.
         if not _cleaned_prefix_shape(prefix, length):
             continue
+        
+        # If stdnum is available, use it to verify the checksum of the candidate prefix.
         if STDNUM_AVAILABLE:
             try:
                 return stdnum_isbn.validate(prefix)
             except Exception:
                 continue
+        # Fallback: if it has the right shape, we accept it as a prefix.
         return prefix
 
     return ""
@@ -145,6 +162,7 @@ def log_invalid_isbn(isbn_value: str, reason: str = messages.GuiMessages.warn_ti
         Human-readable reason (unused in the current log format).
     """
     timestamp = datetime.now().isoformat()
+    # Open file in append mode so we accumulate errors over multiple runs.
     with INVALID_ISBN_LOG.open("a", encoding="utf-8") as f:
         f.write(f"{timestamp}\t{isbn_value}\n")
 
@@ -171,13 +189,17 @@ def _simple_normalize_isbn(isbn_str: str) -> str:
     # Strip everything except digits and the letter X (ISBN-10 check character).
     cleaned = _isbn_chars_only(strip_isbn_qualifier(isbn_str))
 
-    # ISBN-10 is 10 characters; ISBN-13 is 13 characters.
+    # Pattern 1: The entire cleaned string is a valid ISBN length.
     if len(cleaned) in (10, 13):
         return cleaned.upper()
+        
+    # Pattern 2: The cleaned string starts with a valid ISBN but has trailing junk.
     for length in (13, 10):
         prefix = cleaned[:length]
         if _cleaned_prefix_shape(prefix, length):
             return prefix
+            
+    # No recognizable ISBN variant found.
     return ""
 
 
@@ -187,6 +209,7 @@ def _simple_validate_isbn(isbn_str: str) -> bool:
 
     Returns ``True`` if the cleaned string has 10 or 13 characters.
     """
+    # Reuse normalization logic to perform the check.
     cleaned = _simple_normalize_isbn(isbn_str)
     return len(cleaned) in (10, 13)
 
@@ -210,10 +233,13 @@ def _isbn_sort_key(isbn_str: str) -> str:
     str
         Sort key string.
     """
+    # Normalize to a raw string for consistent sorting.
     normalized = _simple_normalize_isbn(isbn_str).upper()
     if normalized.endswith("X"):
         # Replace trailing X with "9" for numeric sort ordering.
+        # This is a heuristic to keep ISBNs somewhat numeric during string sorts.
         normalized = normalized[:-1] + "9"
+    # Fall back to the raw input if normalization fails completely.
     return normalized or isbn_str.strip().upper()
 
 
@@ -240,9 +266,11 @@ def pick_lowest_isbn(isbns: Iterable[str]) -> str:
     ValueError
         If the iterable is empty or contains only blank strings.
     """
+    # Filter out empty or whitespace-only candidates.
     candidates = [isbn for isbn in isbns if isbn and str(isbn).strip()]
     if not candidates:
         raise ValueError("At least one ISBN is required")
+    # Return the minimum using our custom sort key.
     return min(candidates, key=_isbn_sort_key)
 
 
@@ -265,19 +293,24 @@ def normalize_isbn(isbn_str: str) -> str:
         Normalised ISBN string (digits + optional ``X``), or ``""`` on
         failure.
     """
+    # First, strip MARC binding qualifiers and other text boilerplate.
     candidate = strip_isbn_qualifier(isbn_str)
 
     if STDNUM_AVAILABLE:
         try:
+            # Use stdnum for rigorous checksum-based validation.
             normalized_isbn_str = stdnum_isbn.validate(candidate)
             return normalized_isbn_str
         except Exception:
+            # If validation fails, try to extract a valid ISBN prefix from the front.
             prefix = _valid_isbn_prefix(candidate)
             if prefix:
                 return prefix
+            # Log the failure for manual review.
             log_invalid_isbn(isbn_str, messages.GuiMessages.warn_title_invalid)
             return ""
     else:
+        # Fallback: perform basic structural check.
         result = _simple_normalize_isbn(isbn_str)
         if not result:
             log_invalid_isbn(isbn_str, messages.GuiMessages.warn_title_invalid)
@@ -305,9 +338,9 @@ def _simple_isbn13_checksum(first_twelve: str) -> str:
     total = 0
     for index, char in enumerate(first_twelve):
         digit = int(char)
-        # Odd-indexed positions (0-based) are weighted by 3; even by 1.
+        # Weights alternate between 1 and 3.
         total += digit if index % 2 == 0 else digit * 3
-    # The final modulo ensures a result of 0 when total is already divisible by 10.
+    # Final check digit calculation.
     return str((10 - (total % 10)) % 10)
 
 
@@ -330,11 +363,13 @@ def _canonical_linked_isbn(isbn_str: str) -> str:
     """
     if STDNUM_AVAILABLE:
         try:
+            # Convert using the stdnum library's conversion utility.
             validated = stdnum_isbn.validate(isbn_str)
             return stdnum_isbn.to_isbn13(validated)
         except Exception:
             return ""
 
+    # Fallback conversion logic.
     cleaned = _simple_normalize_isbn(isbn_str)
     if not cleaned:
         return ""
@@ -342,7 +377,7 @@ def _canonical_linked_isbn(isbn_str: str) -> str:
         return cleaned
     if len(cleaned) == 10:
         # Convert ISBN-10 to ISBN-13: prepend "978" and recompute the check digit.
-        # The ISBN-10 check digit (last character) is dropped before prefixing.
+        # The original ISBN-10 check digit is discarded as it is mathematically different.
         prefix = "978" + cleaned[:-1]
         return prefix + _simple_isbn13_checksum(prefix)
     return ""
@@ -367,8 +402,10 @@ def linked_isbns_match(left: str, right: str) -> bool:
     -------
     bool
     """
+    # Normalize both to ISBN-13 before comparing.
     left_canonical = _canonical_linked_isbn(left)
     right_canonical = _canonical_linked_isbn(right)
+    # Both must be valid and identical.
     return bool(left_canonical) and left_canonical == right_canonical
 
 
@@ -393,18 +430,23 @@ def validate_isbn(isbn_str: str) -> bool:
     -------
     bool
     """
+    # Clean the input to remove MARC binding qualifiers.
     candidate = strip_isbn_qualifier(isbn_str)
 
     if STDNUM_AVAILABLE:
         try:
+            # Use high-fidelity checksum validation.
             stdnum_isbn.validate(candidate)
             return True
         except Exception:
+            # Fall back to checking if the starting prefix is valid.
             if _valid_isbn_prefix(candidate):
                 return True
+            # Log failure.
             log_invalid_isbn(isbn_str, messages.GuiMessages.warn_title_invalid)
             return False
     else:
+        # Fallback: check length and digit shape only.
         result = _simple_validate_isbn(isbn_str)
         if not result:
             log_invalid_isbn(isbn_str, messages.GuiMessages.warn_title_invalid)

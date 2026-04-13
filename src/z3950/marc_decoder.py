@@ -69,6 +69,7 @@ def pymarc_record_to_json(record: Any) -> Dict[str, List[Dict[str, Any]]]:
     - Returns ``{"fields": []}`` for invalid or empty input to allow callers
       to proceed without special-casing ``None``.
     """
+    # Defensive check: ensure the object passed has the expected interface.
     if not hasattr(record, 'get_fields'):
         logger.warning("Invalid pymarc Record: missing get_fields method")
         return {"fields": []}
@@ -81,6 +82,7 @@ def pymarc_record_to_json(record: Any) -> Dict[str, List[Dict[str, Any]]]:
     # from different field occurrences during normalization.
     for field_tag in ("020", "050", "060"):
         try:
+            # Fetch all occurrences of the specific MARC tag.
             field_objs = record.get_fields(field_tag)
             if not field_objs:
                 continue
@@ -95,6 +97,8 @@ def pymarc_record_to_json(record: Any) -> Dict[str, List[Dict[str, Any]]]:
             # lc_assigned covers ind2='0'; others covers ind2='4', ' ', etc.
             lc_assigned = [fo for fo in field_objs if getattr(fo, "indicator2", None) == "0"]
             others = [fo for fo in field_objs if getattr(fo, "indicator2", None) != "0"]
+            
+            # Combine them to create a priority list: LC records always take precedence.
             preferred_candidates = lc_assigned + others
 
             # Walk candidates in priority order; stop at the first that has
@@ -106,6 +110,7 @@ def pymarc_record_to_json(record: Any) -> Dict[str, List[Dict[str, Any]]]:
                     subfields_list = subfields
                     break
 
+            # If a suitable field was found, map it to the dictionary structure.
             if preferred is not None and subfields_list:
                 fields.append({
                     field_tag: {
@@ -115,8 +120,10 @@ def pymarc_record_to_json(record: Any) -> Dict[str, List[Dict[str, Any]]]:
                     }
                 })
         except Exception as e:
+            # Fail gracefully for individual field extraction errors.
             logger.debug(f"Error extracting field {field_tag}: {e}")
 
+    # Return the assembled fields wrapped in the standard MARC-JSON structure.
     return {"fields": fields}
 
 
@@ -152,13 +159,19 @@ def _extract_subfields_from_pymarc_field(field: Any) -> List[Dict[str, str]]:
     subfields_list = []
 
     try:
+        # Check if the field object has a subfields attribute.
         if hasattr(field, 'subfields'):
+            # Iterate through the subfield namedtuples.
             for sf in field.subfields:
                 code = sf.code
                 value = sf.value
+                # Only include subfields that have both a code and a value.
                 if code and value:
+                    # Clean the value and store it as a single-key dictionary.
+                    # This format is required for compatibility with the rest of the project's parsers.
                     subfields_list.append({code: value.strip() if isinstance(value, str) else str(value)})
     except Exception as e:
+        # Log parsing errors for debugging but don't crash.
         logger.debug(f"Error extracting subfields: {e}")
 
     return subfields_list
@@ -192,7 +205,10 @@ def extract_call_numbers_from_pymarc(record: Any) -> tuple[Optional[str], Option
     # to prevent import cycles with other parts of the pipeline.
     from src.utils.marc_parser import extract_call_numbers_from_json
 
+    # Step 1: Decode the complex pymarc object into a simple MARC-JSON dictionary.
     marc_json = pymarc_record_to_json(record)
+    
+    # Step 2: Use the existing logic in marc_parser to normalize and extract the call numbers.
     return extract_call_numbers_from_json(marc_json)
 
 
@@ -219,9 +235,13 @@ def extract_isbns_from_pymarc(record: Any) -> list[str]:
         Deduplicated list of normalised ISBN strings found in the record.
         Empty list if none are present.
     """
+    # Lazy load the utility function to minimize import-time overhead.
     from src.utils.marc_parser import extract_isbns_from_json
 
+    # Convert the record to the common JSON-like structure.
     marc_json = pymarc_record_to_json(record)
+    
+    # Extract ISBNs using the standard harvester logic.
     # dict.fromkeys preserves insertion order while eliminating duplicates —
     # the dict values are unused; only the keys (ISBNs) matter here.
     return list(dict.fromkeys(extract_isbns_from_json(marc_json)))

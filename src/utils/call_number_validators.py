@@ -23,6 +23,7 @@ Part of the LCCN Harvester Project.
 
 from typing import Optional, Tuple
 
+# Import the specific validation functions for each classification system.
 from src.utils.lccn_validator import is_valid_lccn
 from src.utils.nlmcn_validator import is_valid_nlmcn
 
@@ -52,19 +53,27 @@ def validate_call_numbers(
     tuple[str | None, str | None]
         Validated (lccn, nlmcn) pair. Invalid ones become None.
     """
+    # Initialize result variables as None to signify "no valid data".
     validated_lccn = None
     validated_nlmcn = None
 
+    # Handle LCCN validation if a candidate string was provided.
     if lccn:
+        # Normalize by removing leading/trailing whitespace.
         lccn = lccn.strip()
+        # Delegate to the specialized LCCN regex-based validator.
         if is_valid_lccn(lccn):
             validated_lccn = lccn
 
+    # Handle NLMCN validation if a candidate string was provided.
     if nlmcn:
+        # Normalize by removing leading/trailing whitespace.
         nlmcn = nlmcn.strip()
+        # Delegate to the specialized NLMCN regex-based validator.
         if is_valid_nlmcn(nlmcn):
             validated_nlmcn = nlmcn
 
+    # Return the clean pair. Callers can reliably use these without further checks.
     return validated_lccn, validated_nlmcn
 
 
@@ -84,13 +93,18 @@ def validate_lccn(call_number: Optional[str], source: Optional[str] = None) -> O
     str | None
         The call number if valid, None otherwise.
     """
+    # Quick exit for null or empty input.
     if not call_number:
         return None
 
+    # Common normalization step.
     call_number = call_number.strip()
+    
+    # Return the string only if it passes the classification-specific validation rules.
     if is_valid_lccn(call_number):
         return call_number
 
+    # Explicitly return None if validation fails.
     return None
 
 
@@ -110,11 +124,16 @@ def validate_nlmcn(call_number: Optional[str], source: Optional[str] = None) -> 
     str | None
         The call number if valid, None otherwise.
     """
+    # Quick exit for null or empty input.
     if not call_number:
         return None
 
+    # Common normalization step.
     call_number = call_number.strip()
+    
+    # Return the string only if it passes the classification-specific validation rules.
     if is_valid_nlmcn(call_number):
         return call_number
 
+    # Explicitly return None if validation fails.
     return None
