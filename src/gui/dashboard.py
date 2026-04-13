@@ -944,31 +944,7 @@ class DashboardTab(QWidget):
         Args:
             stats: Either a ``RunStats`` dataclass or a dict containing harvest summary keys.
         """
-        # Prefer the embedded RunStats object when available in a dict
-        if isinstance(stats, dict) and hasattr(stats.get("run_stats"), 'processed_unique'):
-            stats = stats["run_stats"]
-        if hasattr(stats, 'processed_unique'):  # RunStats dataclass
-            found = getattr(stats, 'found', 0)
-            failed = getattr(stats, 'failed', 0)
-            skipped = getattr(stats, 'skipped', 0)
-            invalid = getattr(stats, 'invalid', 0)
-            processed = found + failed + skipped
-            self.session_stats = {
-                "processed": processed,
-                "successful": found,
-                "failed": failed + skipped,
-                "invalid": invalid,
-            }
-        else:  # legacy dict
-            stats = stats or {}
-            successful = int(stats.get("found", 0)) + int(stats.get("cached", 0))
-            failed = int(stats.get("failed", 0)) + int(stats.get("skipped", 0))
-            self.session_stats = {
-                "processed": successful + failed,
-                "successful": successful,
-                "failed": failed,
-                "invalid": int(stats.get("invalid", 0)),
-            }
+        self.session_stats = self._normalise_run_stats(stats)
         self._render_session_stats()
 
     def update_live_stats(self, stats):
@@ -982,19 +958,53 @@ class DashboardTab(QWidget):
         """
         if not hasattr(stats, 'processed_unique'):
             return  # Only handle RunStats dataclass
-            
-        found = getattr(stats, 'found', 0)
-        failed = getattr(stats, 'failed', 0)
-        skipped = getattr(stats, 'skipped', 0)
-        invalid = getattr(stats, 'invalid', 0)
-        processed = found + failed + skipped
-        self.session_stats = {
-            "processed": processed,
-            "successful": found,
-            "failed": failed + skipped,
-            "invalid": invalid,
-        }
+
+        self.session_stats = self._normalise_run_stats(stats)
         self._render_session_stats()
+
+    @staticmethod
+    def _int_stat(value) -> int:
+        """Convert a harvest stat value to an integer counter."""
+        try:
+            return int(value or 0)
+        except Exception:
+            return 0
+
+    @classmethod
+    def _normalise_run_stats(cls, stats):
+        """Return dashboard KPI counters from a summary dict or RunStats object.
+
+        Final harvest summaries carry ``found`` and ``cached`` separately.  Both are
+        successful results and should be shown together in the Successful KPI.
+        """
+        if isinstance(stats, dict):
+            summary_keys = {"found", "cached", "failed", "skipped", "invalid"}
+            if summary_keys.intersection(stats):
+                successful = cls._int_stat(stats.get("found")) + cls._int_stat(stats.get("cached"))
+                failed = cls._int_stat(stats.get("failed")) + cls._int_stat(stats.get("skipped"))
+                return {
+                    "processed": successful + failed,
+                    "successful": successful,
+                    "failed": failed,
+                    "invalid": cls._int_stat(stats.get("invalid")),
+                }
+            embedded_stats = stats.get("run_stats")
+            if hasattr(embedded_stats, "processed_unique"):
+                stats = embedded_stats
+            else:
+                return {"processed": 0, "successful": 0, "failed": 0, "invalid": 0}
+
+        if hasattr(stats, "processed_unique"):
+            successful = cls._int_stat(getattr(stats, "found", 0)) + cls._int_stat(getattr(stats, "cached", 0))
+            failed = cls._int_stat(getattr(stats, "failed", 0)) + cls._int_stat(getattr(stats, "skipped", 0))
+            return {
+                "processed": successful + failed,
+                "successful": successful,
+                "failed": failed,
+                "invalid": cls._int_stat(getattr(stats, "invalid", 0)),
+            }
+
+        return {"processed": 0, "successful": 0, "failed": 0, "invalid": 0}
 
     def reset_dashboard_stats(self):
         """Clear all in-memory session counters and the recent-results list.
