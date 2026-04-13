@@ -16,9 +16,8 @@ This module contains two widgets:
     create/delete profiles.  All changes are dirty-tracked (``has_unsaved_changes``)
     so the user is prompted before navigating away from unsaved work.
 
-    The ``stop_rule_combo`` is intentionally hidden on this page; it is kept as a
-    round-trip storage vehicle so ``get_config`` / ``_save_current_profile`` can
-    persist the stop-rule value that is edited in ``HarvestTab``'s own UI.
+    The ``stop_rule_combo`` is shown on this page beside the call-number mode so
+    the active profile owns all persistent harvest behavior choices.
 
 Signals emitted:
     ``config_changed(dict)`` — whenever a setting is modified but not yet saved.
@@ -38,6 +37,34 @@ from src.config.profile_manager import ProfileManager
 from .combo_boxes import ConsistentComboBox
 from .icons import get_pixmap, SVG_SETTINGS, SVG_HARVEST
 from .styles import CATPPUCCIN_THEME
+
+
+_STOP_RULE_MUTED_COMBO_QSS = (
+    "QComboBox, QComboBox:disabled {"
+    "  color: rgba(120, 120, 140, 0.60);"
+    "  background: rgba(100, 100, 120, 0.10);"
+    "  border: 1px solid rgba(120, 120, 140, 0.25);"
+    "  border-radius: 6px;"
+    "}"
+    "QComboBox::drop-down, QComboBox::drop-down:disabled {"
+    "  border: none;"
+    "}"
+)
+
+
+def _set_stop_rule_control_state(label: QLabel, combo: QComboBox, enabled: bool) -> None:
+    """Enable or visibly mute a Stop Rule label/combo pair."""
+    label.setEnabled(True)
+    combo.setEnabled(enabled)
+    label.setStyleSheet("")
+    label.setCursor(Qt.CursorShape.ArrowCursor)
+    if enabled:
+        combo.setStyleSheet("")
+        combo.setCursor(Qt.CursorShape.ArrowCursor)
+        return
+
+    combo.setStyleSheet(_STOP_RULE_MUTED_COMBO_QSS)
+    combo.setCursor(Qt.CursorShape.ForbiddenCursor)
 
 
 class CreateProfileDialog(QDialog):
@@ -134,10 +161,25 @@ class CreateProfileDialog(QDialog):
         self.mode_combo.addItem("LCCN only", "lccn")
         self.mode_combo.addItem("NLMCN only", "nlmcn")
         self.mode_combo.addItem("Both", "both")
+        self.mode_combo.currentTextChanged.connect(self._toggle_dialog_stop_rule_visibility)
         mode_row.addWidget(mode_label)
         mode_row.addStretch()
         mode_row.addWidget(self.mode_combo)
         settings_layout.addLayout(mode_row)
+
+        stop_row = QHBoxLayout()
+        self.stop_rule_label = QLabel("Stop Rule")
+        self.stop_rule_label.setStyleSheet("")
+        self.stop_rule_combo = ConsistentComboBox()
+        self.stop_rule_combo.setFixedWidth(220)
+        self.stop_rule_combo.addItem("Stop if either found", "stop_either")
+        self.stop_rule_combo.addItem("Stop if LCCN found", "stop_lccn")
+        self.stop_rule_combo.addItem("Stop if NLMCN found", "stop_nlmcn")
+        self.stop_rule_combo.addItem("Continue until both found", "continue_both")
+        stop_row.addWidget(self.stop_rule_label)
+        stop_row.addStretch()
+        stop_row.addWidget(self.stop_rule_combo)
+        settings_layout.addLayout(stop_row)
 
 
         layout.addWidget(settings_frame)
@@ -188,13 +230,19 @@ class CreateProfileDialog(QDialog):
         # Block signals to prevent spurious change notifications while pre-filling.
         self.retry_spin.blockSignals(True)
         self.mode_combo.blockSignals(True)
+        self.stop_rule_combo.blockSignals(True)
         self.retry_spin.setValue(int(settings.get("retry_days", 7)))
         mode = settings.get("call_number_mode", "lccn")
         # findData looks up by the item's UserRole data (the mode string), not the label.
         idx = self.mode_combo.findData(mode)
         self.mode_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        stop_rule = settings.get("stop_rule", "stop_either")
+        idx_stop = self.stop_rule_combo.findData(stop_rule)
+        self.stop_rule_combo.setCurrentIndex(idx_stop if idx_stop >= 0 else 0)
         self.retry_spin.blockSignals(False)
         self.mode_combo.blockSignals(False)
+        self.stop_rule_combo.blockSignals(False)
+        self._toggle_dialog_stop_rule_visibility()
 
     def profile_name(self) -> str:
         """Return the stripped profile name entered by the user."""
@@ -222,17 +270,25 @@ class CreateProfileDialog(QDialog):
             "call_number_mode": mode,
             "collect_lccn": mode in {"lccn", "both"},
             "collect_nlmcn": mode in {"nlmcn", "both"},
-            "stop_rule": "stop_either",
+            "stop_rule": self.stop_rule_combo.currentData() if mode == "both" else "stop_either",
             "output_tsv": True,
             "output_invalid_isbn_file": True,
         }
+
+    def _toggle_dialog_stop_rule_visibility(self):
+        """Enable the starting stop-rule control only when the dialog mode is Both."""
+        _set_stop_rule_control_state(
+            self.stop_rule_label,
+            self.stop_rule_combo,
+            self.mode_combo.currentData() == "both",
+        )
 
 
 class ConfigTab(QWidget):
     """Profile-settings pane displayed in the upper half of the Configure page splitter.
 
     Contains a profile selector combo with New/Save/Delete buttons, and a compact
-    harvest-settings row (retry interval, call-number mode).
+    harvest-settings row (retry interval, call-number mode, stop rule).
 
     Key instance variables:
         profile_manager (ProfileManager): Shared profile storage/retrieval helper.
@@ -245,8 +301,7 @@ class ConfigTab(QWidget):
         btn_new / btn_save / btn_delete: Profile management buttons.
         spin_retry: Retry-interval spin box (0–365 days).
         call_number_combo: Call-number mode selector (LCCN/NLMCN/Both).
-        stop_rule_combo: Hidden combo that round-trips the stop-rule setting; the
-            visible control lives in ``HarvestTab``.
+        stop_rule_combo: Stop-rule selector used when the call-number mode is Both.
 
     Signals:
         config_changed(dict): Emitted whenever a setting control is modified.
@@ -380,27 +435,41 @@ class ConfigTab(QWidget):
         self.call_number_combo.addItem("NLMCN only", "nlmcn")
         self.call_number_combo.addItem("Both", "both")
         self.call_number_combo.currentTextChanged.connect(self._on_setting_changed)  # marks profile dirty
+        self.call_number_combo.currentTextChanged.connect(self._toggle_stop_rule_visibility)
         mode_lbl.setBuddy(self.call_number_combo)
 
         settings_row.addWidget(mode_lbl)
         settings_row.addWidget(self.call_number_combo)
-        settings_row.addStretch()
+        settings_row.addSpacing(12)
 
-        # The stop-rule combo is managed in the Harvest tab's UI, not here.
-        # It is kept as a hidden control so _load_profile / get_config can
-        # read and write the persisted stop_rule value without touching the harvest tab.
+        self.stop_rule_label = QLabel("Stop &Rule")
         self.stop_rule_combo = ConsistentComboBox()
+        self.stop_rule_combo.setMinimumWidth(180)
+        self.stop_rule_combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.stop_rule_combo.setAccessibleName("Stop rule")
+        self.stop_rule_combo.setAccessibleDescription("Choose when a Both-mode harvest should stop looking for additional call numbers.")
+        self.stop_rule_combo.setToolTip("Used only when Call Number Selection is Both")
         self.stop_rule_combo.addItem("Stop if either found", "stop_either")
         self.stop_rule_combo.addItem("Stop if LCCN found", "stop_lccn")
         self.stop_rule_combo.addItem("Stop if NLMCN found", "stop_nlmcn")
         self.stop_rule_combo.addItem("Continue until both found", "continue_both")
-        self.stop_rule_combo.hide()  # Not shown on this page; value is round-tripped via get_config.
+        self.stop_rule_combo.currentTextChanged.connect(self._on_setting_changed)
+        self.stop_rule_label.setBuddy(self.stop_rule_combo)
+
+        settings_row.addWidget(self.stop_rule_label)
+        settings_row.addWidget(self.stop_rule_combo)
+        settings_row.addStretch()
 
         layout.addWidget(settings_frame)
+        self._toggle_stop_rule_visibility()
 
-    def _toggle_stop_rule_visibility(self):
-        """No-op stub; stop-rule visibility is managed by ``HarvestTab`` in the current UI."""
-        return None
+    def _toggle_stop_rule_visibility(self, *_args):
+        """Enable Stop Rule only when the profile is configured for Both mode."""
+        _set_stop_rule_control_state(
+            self.stop_rule_label,
+            self.stop_rule_combo,
+            self.call_number_combo.currentData() == "both",
+        )
 
     def refresh_targets_preview(self, targets=None):
         """No-op stub; targets are displayed live in ``TargetsTab``, not here."""
@@ -435,6 +504,7 @@ class ConfigTab(QWidget):
             "call_number_mode": mode,
             "collect_lccn": mode in {"lccn", "both"},
             "collect_nlmcn": mode in {"nlmcn", "both"},
+            "stop_rule": settings.get("stop_rule", "stop_either") if mode == "both" else "stop_either",
         }
 
     def _find_profile_with_same_settings(self, candidate_settings, exclude_name: str = ""):
@@ -519,6 +589,7 @@ class ConfigTab(QWidget):
         # Block signals while populating to avoid spurious has_unsaved_changes flags.
         self.spin_retry.blockSignals(True)
         self.call_number_combo.blockSignals(True)
+        self.stop_rule_combo.blockSignals(True)
         
         self.spin_retry.setValue(config.get("retry_days", 7))
         mode = self._mode_from_settings(config)
@@ -531,6 +602,8 @@ class ConfigTab(QWidget):
         
         self.spin_retry.blockSignals(False)
         self.call_number_combo.blockSignals(False)
+        self.stop_rule_combo.blockSignals(False)
+        self._toggle_stop_rule_visibility()
         
         self.has_unsaved_changes = False
         self.btn_save.setEnabled(False)

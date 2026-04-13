@@ -12,7 +12,8 @@ Public API:
     normalize_to_datetime_str()  -- any supported date value → ISO datetime string
     normalize_to_yyyymmdd_int()  -- any supported date value → ``YYYYMMDD`` integer
     yyyymmdd_to_iso_date()       -- any supported date value → ``"YYYY-MM-DD"``
-    classification_from_lccn()   -- extract LoC class letters from a call number
+    classification_from_call_number() -- extract leading class letters from a call number
+    classification_from_lccn()        -- backward-compatible alias for LC call numbers
 """
 
 from __future__ import annotations
@@ -157,30 +158,31 @@ def normalize_to_yyyymmdd_int(value: Optional[int | str]) -> int:
     return today_yyyymmdd()
 
 
-def classification_from_lccn(lccn: Optional[str]) -> Optional[str]:
-    """Best-effort derivation of LoC classification letters from a call number.
+def classification_from_call_number(call_number: Optional[str]) -> Optional[str]:
+    """Best-effort derivation of leading classification letters from a call number.
 
-    Reads the leading alphabetic prefix of a Library of Congress call number
-    (up to 3 letters) which represents the LoC subject classification (e.g.
-    ``"QA"`` for mathematics, ``"PS"`` for American literature).
+    Reads the leading alphabetic prefix of a Library of Congress or National
+    Library of Medicine call number (up to 3 letters), such as ``"QA"`` for
+    mathematics or ``"WR"`` for an NLM dermatology schedule.
     
     The extracted classification is stored separately in the ``main`` table so
     results can be filtered or faceted by subject (e.g., all call numbers in
     the ``"QA"`` mathematics category).
 
     Args:
-        lccn: A raw LC call number string such as ``"QA76.73.P98"``.
+        call_number: A raw call number string such as ``"QA76.73.P98"`` or
+            ``"WR 140 D435172 2001"``.
 
     Returns:
-        The uppercase leading letter(s) like ``"QA"``, or ``None`` if *lccn*
-        is empty or starts with a non-alphabetic character.
+        The uppercase leading letter(s) like ``"QA"`` or ``"WR"``, or ``None``
+        if *call_number* is empty or starts with a non-alphabetic character.
     """
     # Return None for empty or missing values
-    if not lccn:
+    if not call_number:
         return None
     # Collect leading alphabetic characters
     letters: list[str] = []
-    for char in lccn.strip():
+    for char in call_number.strip():
         if char.isalpha():
             # Append uppercase letter and count them
             letters.append(char.upper())
@@ -192,3 +194,8 @@ def classification_from_lccn(lccn: Optional[str]) -> Optional[str]:
             break  # First non-letter marks the end of the classification prefix
     # Return the collected letters as a string, or None if no letters found
     return "".join(letters) if letters else None
+
+
+def classification_from_lccn(lccn: Optional[str]) -> Optional[str]:
+    """Backward-compatible wrapper for LC call-number classification extraction."""
+    return classification_from_call_number(lccn)

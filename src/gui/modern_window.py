@@ -476,8 +476,8 @@ class ModernMainWindow(QMainWindow):
         current_index = self.stack.currentIndex()
         index = btn.property("page_index")
         # Guard: prompt for unsaved changes when leaving the Configure page.
-        if current_index == 0 and index != 0:
-            if not self.targets_config_tab.resolve_unsaved_changes():
+        if current_index == 1 and index != 1:
+            if not self.targets_config_tab.resolve_unsaved_changes("open another tab"):
                 # User cancelled — restore the previously-checked nav button.
                 current_button = next(
                     (

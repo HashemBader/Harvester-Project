@@ -118,6 +118,15 @@ def is_valid_lccn(call_number: str) -> bool:
     if digit_count == 0:
         return False
 
+    if rest.startswith("-"):
+        range_end = rest[1:]
+        return (
+            len(parts) == 1
+            and range_end.isdigit()
+            and 1 <= len(range_end) <= 4
+            and int(range_end) >= int(remainder[:j])
+        )
+
     # --- Step 3: Validate optional decimal subdivision within the first token ---
     # e.g., ".73" in "QA76.73" or ".73.P38" in "QA76.73.P38"
     rest = remainder[j:]

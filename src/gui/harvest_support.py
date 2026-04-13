@@ -42,6 +42,7 @@ from PyQt6.QtWidgets import QGroupBox, QMessageBox
 
 from src.config.profile_manager import ProfileManager
 from src.database import DatabaseManager, now_datetime_str
+from src.database.date_utils import classification_from_call_number
 from src.database.db_manager import yyyymmdd_to_iso_date
 from src.harvester.marc_import import ParsedMarcImportRecord
 from src.harvester.orchestrator import HarvestCancelled
@@ -82,6 +83,11 @@ def _extract_lc_classification(lccn: str) -> str:
         return ""
     match = re.match(r"^([A-Za-z]+)", lccn.strip())
     return match.group(1).upper() if match else ""
+
+
+def _extract_call_number_classification(call_number: str) -> str:
+    """Return the leading classification letters for LC or NLM call numbers."""
+    return classification_from_call_number(call_number) or ""
 
 
 def _safe_filename(value: str) -> str:
@@ -701,9 +707,18 @@ class HarvestWorker(QThread):
         """
         mode = (self.config.get("call_number_mode", "lccn") or "lccn").strip().lower()
         if mode == "nlmcn":
-            return ["ISBN", "NLM", "NLM Source", "Date"]
+            return ["ISBN", "NLM", "NLM Source", "NLM Classification", "Date"]
         if mode == "both":
-            return ["ISBN", "LCCN", "LCCN Source", "Classification", "NLM", "NLM Source", "Date"]
+            return [
+                "ISBN",
+                "LCCN",
+                "LCCN Source",
+                "Classification",
+                "NLM",
+                "NLM Source",
+                "NLM Classification",
+                "Date",
+            ]
         return ["ISBN", "LCCN", "LCCN Source", "Classification", "Date"]
 
     def _build_success_row(
@@ -716,11 +731,12 @@ class HarvestWorker(QThread):
         nlmcn_source=None,
     ):
         classification = _extract_lc_classification(lccn or "")
+        nlm_classification = _extract_call_number_classification(nlmcn or "")
         date_added = _display_date(now_datetime_str())
         normalized_isbn = str(isbn or "").replace("-", "").strip()
         mode = (self.config.get("call_number_mode", "lccn") or "lccn").strip().lower()
         if mode == "nlmcn":
-            return [normalized_isbn, nlmcn or "", nlmcn_source or "-", date_added]
+            return [normalized_isbn, nlmcn or "", nlmcn_source or "-", nlm_classification, date_added]
         if mode == "both":
             return [
                 normalized_isbn,
@@ -729,6 +745,7 @@ class HarvestWorker(QThread):
                 classification,
                 nlmcn or "",
                 nlmcn_source or "-",
+                nlm_classification,
                 date_added,
             ]
         return [normalized_isbn, lccn or "", lccn_source or "-", classification, date_added]
