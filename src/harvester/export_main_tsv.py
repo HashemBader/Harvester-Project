@@ -15,10 +15,10 @@ is collapsed into a single row per ISBN via SQL ``MAX()``/``GROUP BY``.
 """
 from __future__ import annotations
 
-import csv
-import sqlite3
-from pathlib import Path
-from typing import Union
+import csv  # Writing tab-separated output files
+import sqlite3  # Direct SQLite access (bypasses DatabaseManager for standalone use)
+from pathlib import Path  # OS-independent path handling
+from typing import Union  # Union type hint for db_path / out_path overloads
 
 # Column names written as the first row of every exported TSV file.
 EXPORT_HEADER = [

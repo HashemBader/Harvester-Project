@@ -23,13 +23,13 @@ When ``source="both"``, two files are written: one with ``_success`` appended
 to the stem (for the ``main`` table) and one with ``_failed`` (for the
 ``attempted`` table).
 """
-import csv
-import json
-import re
-from pathlib import Path
-from typing import List, Dict, Any, Optional
+import csv  # Writing TSV and CSV output files
+import json  # Serialising JSON export format
+import re  # Normalising verbose error strings in attempted table
+from pathlib import Path  # OS-independent path handling for output files
+from typing import List, Dict, Any, Optional  # Generic type hints used throughout
 
-from src.database.db_manager import DatabaseManager, MainRecord, AttemptedRecord, yyyymmdd_to_iso_date
+from src.database.db_manager import DatabaseManager, MainRecord, AttemptedRecord, yyyymmdd_to_iso_date  # DB access and date conversion helper
 
 
 class ExportManager:
@@ -38,9 +38,17 @@ class ExportManager:
     All export operations are driven by a single configuration dict passed to
     ``export()``.  The class handles file creation, column selection, and
     optional header rows.
+
+    Attributes:
+        db: Active ``DatabaseManager`` instance used for all read operations.
     """
 
     def __init__(self, db_path: Optional[str] = None):
+        """Initialise the export manager, connecting to the given database path.
+
+        Args:
+            db_path: Path to the SQLite file.  Uses the application default when ``None``.
+        """
         if db_path:
             self.db = DatabaseManager(db_path)
         else:
@@ -225,6 +233,7 @@ class ExportManager:
         """Write *data* to *path* as a pretty-printed JSON array of objects."""
         objects: List[Dict[str, Any]] = []
         for row in data:
+            # Guard against a short row by defaulting missing column values to None
             obj = {headers[i]: row[i] if i < len(row) else None for i in range(len(headers))}
             objects.append(obj)
 

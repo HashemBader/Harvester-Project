@@ -24,19 +24,19 @@ Signals emitted:
     ``profile_changed(str)`` — when the active profile is switched or a new one
         is created/deleted.
 """
-from PyQt6.QtWidgets import (
+from PyQt6.QtWidgets import (  # Core layout and widget classes used throughout the tab
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QComboBox,
     QSpinBox, QMessageBox, QDialog, QDialogButtonBox, QLineEdit,
     QSizePolicy,
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-import shutil
+from PyQt6.QtCore import Qt, pyqtSignal  # Enums and custom-signal support
+import shutil  # Used to copy a source profile's targets file to the new profile directory
 
-from src.config.profile_manager import ProfileManager
-from .combo_boxes import ConsistentComboBox
-from .icons import get_pixmap, SVG_SETTINGS, SVG_HARVEST
-from .styles import CATPPUCCIN_THEME
+from src.config.profile_manager import ProfileManager  # Loads, saves, and enumerates profiles on disk
+from .combo_boxes import ConsistentComboBox  # Project-standard combo that keeps a consistent drop-down width
+from .icons import get_pixmap, SVG_SETTINGS, SVG_HARVEST  # Icon helpers and SVG source strings for header labels
+from .styles import CATPPUCCIN_THEME  # Theme colour palette used for icon tinting
 
 
 _STOP_RULE_MUTED_COMBO_QSS = (
@@ -325,6 +325,13 @@ class ConfigTab(QWidget):
         self.refresh_targets_preview()
 
     def _setup_ui(self):
+        """Build the two-card layout: Profile Settings card and Harvest Settings card.
+
+        Profile Settings card contains the profile selector combo plus New/Save/Delete
+        buttons.  Harvest Settings card contains the retry-interval spin box, the
+        call-number mode combo, and the stop-rule combo (the last is enabled only
+        in "Both" mode).
+        """
         layout = QVBoxLayout(self)
         layout.setSpacing(6)
         layout.setContentsMargins(12, 6, 12, 6)
@@ -732,6 +739,14 @@ class ConfigTab(QWidget):
         return True
 
     def _create_new_profile(self):
+        """Open ``CreateProfileDialog`` and, on acceptance, create the new profile.
+
+        Prompts for unsaved-changes resolution first.  On acceptance:
+        1. Merges dialog settings on top of the source profile's base settings.
+        2. Saves the merged settings under the new name.
+        3. Copies the source profile's targets file to the new profile directory.
+        4. Refreshes the combo and selects the new profile (which triggers a load).
+        """
         if not self.resolve_unsaved_changes("create a new profile"):
             return
 
@@ -748,6 +763,7 @@ class ConfigTab(QWidget):
         source_payload = self.profile_manager.load_profile(source_profile)
         base_settings = self._extract_profile_settings(source_payload).copy()
         new_settings = dialog.profile_settings()
+        # Dialog values override any matching keys from the source profile.
         base_settings.update(new_settings)
 
         self.profile_manager.save_profile(name, base_settings)
@@ -804,7 +820,16 @@ class ConfigTab(QWidget):
         self._create_new_profile()
 
     def get_config(self):
-        """Public accessor for other tabs."""
+        """Return the current in-memory settings as a dict without saving to disk.
+
+        Used by sibling tabs (e.g. HarvestTab) to read the active profile's settings
+        from the live controls rather than re-reading the profile file.
+
+        Returns:
+            Dict with keys ``retry_days``, ``call_number_mode``, ``collect_lccn``,
+            ``collect_nlmcn``, ``stop_rule``, ``output_tsv``, and
+            ``output_invalid_isbn_file``.
+        """
         mode = self._current_call_number_mode()
         return {
             "retry_days": self.spin_retry.value(),
@@ -818,13 +843,29 @@ class ConfigTab(QWidget):
         }
 
     def _current_call_number_mode(self):
+        """Return the validated call-number mode string from the live combo.
+
+        Guards against an unexpected ``None`` / empty value by falling back to ``"lccn"``.
+        """
         mode = self.call_number_combo.currentData()
         return mode if mode in {"lccn", "nlmcn", "both"} else "lccn"
 
     def _mode_from_settings(self, settings):
+        """Derive the canonical call-number mode string from a settings dict.
+
+        Handles both the modern ``call_number_mode`` string key and the legacy
+        ``collect_lccn`` / ``collect_nlmcn`` boolean flags so old profiles load correctly.
+
+        Args:
+            settings: Flat settings dict (may be modern or legacy format).
+
+        Returns:
+            One of ``"lccn"``, ``"nlmcn"``, or ``"both"``.
+        """
         mode = settings.get("call_number_mode")
         if mode in {"lccn", "nlmcn", "both"}:
             return mode
+        # Fall back to legacy boolean flags for profiles saved before call_number_mode existed.
         collect_lccn = bool(settings.get("collect_lccn", True))
         collect_nlmcn = bool(settings.get("collect_nlmcn", False))
         if collect_lccn and collect_nlmcn:
