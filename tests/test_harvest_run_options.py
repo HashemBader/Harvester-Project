@@ -24,8 +24,7 @@ class _HarvestStartState:
         self._config = config
         self._started_config = None
         self._started_targets = None
-        self.chk_marc_only = _Check(True)
-        self.chk_db_only = _Check(False)
+        self.chk_db_only = _Check(True)
         self.log_output = _Log()
 
     def _config_getter(self):
@@ -43,7 +42,7 @@ class _HarvestStartState:
         self._bypass_retry_isbns = bypass_retry_isbns
 
 
-def test_marc_only_harvest_uses_configured_both_stop_rule():
+def test_db_only_harvest_uses_configured_both_stop_rule():
     tab = _HarvestStartState(
         {
             "retry_days": 0,
@@ -58,7 +57,7 @@ def test_marc_only_harvest_uses_configured_both_stop_rule():
     assert tab._started_config["stop_rule"] == "continue_both"
     assert tab._started_config["both_stop_policy"] == "both"
     assert tab._started_config["db_only"] is True
-    assert "MARC-only" in tab.log_output.text
+    assert "Database-only" in tab.log_output.text
 
 
 class _WorkerState:
