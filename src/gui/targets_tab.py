@@ -16,13 +16,13 @@ Key design:
   harvest tab and dashboard can react without polling.
 """
 
-from concurrent.futures import ThreadPoolExecutor, as_completed  # Parallel connectivity probes without blocking the UI
-import urllib.request  # Lightweight HTTP HEAD/GET probes for built-in API targets
-from pathlib import Path  # OS-independent paths for icon files
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import urllib.request
+from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal, QEvent, QSize  # Enums, custom signals, event filtering, and icon sizing
-from PyQt6.QtGui import QIcon, QColor                   # Icon loading and named colour values
-from PyQt6.QtWidgets import (  # All table, layout, and control widgets used in this tab
+from PyQt6.QtCore import Qt, pyqtSignal, QEvent, QSize
+from PyQt6.QtGui import QIcon, QColor
+from PyQt6.QtWidgets import (
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -42,14 +42,14 @@ from PyQt6.QtWidgets import (  # All table, layout, and control widgets used in 
     QSizePolicy,
 )
 
-from src.config.profile_manager import ProfileManager        # Resolves the active profile and its targets file path
-from src.utils.targets_manager import TargetsManager, Target  # Persistence layer and Target dataclass
-from src.z3950.session_manager import validate_connection     # Live Z39.50 socket probe
+from src.config.profile_manager import ProfileManager
+from src.utils.targets_manager import TargetsManager, Target
+from src.z3950.session_manager import validate_connection
 
-from .combo_boxes import ConsistentComboBox  # Combo box subclass with consistent popup sizing
-from .icons import get_icon                  # Renders an SVG string into a QIcon with a given fill colour
-from .theme_manager import ThemeManager      # Reads the persisted dark/light preference
-from .target_dialog import TargetDialog      # Add/edit dialog for Z39.50 targets
+from .combo_boxes import ConsistentComboBox
+from .icons import get_icon
+from .theme_manager import ThemeManager
+from .target_dialog import TargetDialog
 
 
 class TargetsTab(QWidget):
@@ -70,24 +70,18 @@ class TargetsTab(QWidget):
     profile_selected = pyqtSignal(str)
 
     def __init__(self):
-        """Initialise the tab, load the active profile's targets, and run startup checks."""
         super().__init__()
         self._profile_manager = ProfileManager()
-        self.before_mutation = None  # Optional callable injected by TargetsConfigTab to guard edits
+        self.before_mutation = None
         active_profile = self._profile_manager.get_active_profile()
         targets_file = self._profile_manager.get_targets_file(active_profile)
         self.manager = TargetsManager(targets_file=targets_file)
-        self.server_status = {}  # Maps target_id -> bool | None; None means not yet probed
+        self.server_status = {}  # Cache for server status checks
         self._setup_ui()
         self._check_on_startup()  # Check APIs + active Z3950 on launch
 
     def _check_on_startup(self):
-        """Probe all API targets and all selected Z39.50 targets in parallel on launch.
-
-        Results are written to ``self.server_status`` and the table is refreshed
-        once all futures have resolved so the status pills show the correct colour
-        on first paint.
-        """
+        """Check APIs and active Z3950 targets on launch."""
         targets = self.manager.get_all_targets()
         api_targets = [
             t for t in targets
@@ -104,7 +98,6 @@ class TargetsTab(QWidget):
                 for t in api_targets:
                     futures[executor.submit(self._check_api_online, t.name)] = t
                 for t in z3950_active:
-                    # Timeout of 2 s; silent=True suppresses per-target log noise.
                     futures[executor.submit(validate_connection, t.host, t.port, 2, True)] = t
                 for future in as_completed(futures):
                     t = futures[future]
@@ -136,7 +129,6 @@ class TargetsTab(QWidget):
         return super().eventFilter(obj, event)
 
     def _setup_ui(self):
-        """Build the action button row, inline search bar, and the 8-column targets table."""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 10, 16, 10)
         layout.setSpacing(10)
@@ -326,13 +318,7 @@ class TargetsTab(QWidget):
         self.unsetCursor()
 
     def refresh_targets(self, check_servers=False):
-        """Reload all targets from the manager and repopulate the table.
-
-        Args:
-            check_servers: Unused; kept for backwards-compatible call-sites.
-                Connectivity checks are always performed separately via
-                ``check_all_servers`` or ``_check_on_startup``.
-        """
+        """Reload targets from the manager and display them."""
         self.table.clearContents()
         targets = self.manager.get_all_targets()
         self.table.setRowCount(len(targets))
@@ -369,7 +355,7 @@ class TargetsTab(QWidget):
 
             self.table.setCellWidget(row, 0, rank_combo)
 
-            # --- Active toggle (column 1) — shows ✔/✘ and flips on click ---
+            # Active toggle
             active_btn = QPushButton()
             active_btn.setMinimumHeight(32)
             active_btn.setMinimumWidth(50)
@@ -378,8 +364,6 @@ class TargetsTab(QWidget):
             active_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             active_btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             active_btn.setObjectName("ActiveToggle")
-            # The "state" property is used by the QSS rule for ActiveToggle
-            # to colour the button green (active) or muted (inactive).
             if target.selected:
                 active_btn.setProperty("state", "active")
                 active_btn.setText("✔")
@@ -658,18 +642,14 @@ class TargetsTab(QWidget):
             self.refresh_targets()
 
     def _toggle_target_active(self, target):
-        """Toggle a target's active state and probe its connectivity if just activated.
-
-        Args:
-            target: The ``Target`` object whose ``selected`` flag will be flipped.
-        """
+        """Toggle target active status from the table button."""
         if not self._can_mutate_targets("change targets"):
             self.refresh_targets()
             return
         target.selected = not target.selected
         self.manager.modify_target(target)
 
-        # Only probe on activation; no need to check an already-deactivated target.
+        # Check server when activating
         if target.selected:
             try:
                 if target.target_type and "api" in target.target_type.lower():
@@ -718,14 +698,10 @@ class TargetsTab(QWidget):
             return item.data(Qt.ItemDataRole.UserRole)
         return None
     def filter_targets(self, text):
-        """Show only table rows whose Target Name contains *text* (case-insensitive).
-
-        Args:
-            text: The current search string from the inline search box.
-        """
+        """Filter rows based on search text (Target Name only)."""
         text = text.lower()
         for row in range(self.table.rowCount()):
-            name_item = self.table.item(row, 2)  # Name column carries the searchable text
+            name_item = self.table.item(row, 2)  # Name column reverted to index 2
             name = name_item.text().lower() if name_item else ""
             visible = text in name
             self.table.setRowHidden(row, not visible)

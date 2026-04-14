@@ -16,12 +16,12 @@ After ``exec()`` returns, the caller inspects two state flags:
   cache in ``TargetsTab``.
 """
 
-from __future__ import annotations  # Enables `Target | None` union syntax on Python < 3.10
+from __future__ import annotations
 
-from pathlib import Path  # OS-independent path used to locate the icons directory for QSS
+from pathlib import Path
 
-from PyQt6.QtCore import Qt  # Qt enums (cursor shapes, etc.)
-from PyQt6.QtWidgets import (  # All form and layout widgets used in the dialog
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
@@ -33,10 +33,10 @@ from PyQt6.QtWidgets import (  # All form and layout widgets used in the dialog
     QVBoxLayout,
 )
 
-from src.utils.targets_manager import Target         # Target dataclass whose fields populate the form
-from src.z3950.session_manager import validate_connection  # Live Z39.50 socket probe
+from src.utils.targets_manager import Target
+from src.z3950.session_manager import validate_connection
 
-from .theme_manager import ThemeManager  # Reads the persisted dark/light preference for inline QSS
+from .theme_manager import ThemeManager
 
 
 class TargetDialog(QDialog):

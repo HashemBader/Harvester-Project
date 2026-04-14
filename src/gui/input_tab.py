@@ -18,20 +18,20 @@ Module-level constants:
 Note: ``ClickableDropZone`` is also imported directly by ``harvest_tab.py`` as
 a drop target for the run-setup card.
 """
-from PyQt6.QtWidgets import (  # Core layout and widget building blocks
+from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QLineEdit, QFileDialog, QGroupBox,
     QTextEdit, QFrame, QSizePolicy, QScrollArea
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QEvent  # Core Qt enums, custom signals, and event type
-from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QMouseEvent  # Drag-and-drop and mouse event types
-from pathlib import Path  # OS-independent filesystem path handling
-from itertools import islice  # Efficient n-line read without loading the whole file into memory
-from src.utils.isbn_validator import normalize_isbn  # Validates and normalises ISBN-10/13 strings
+from PyQt6.QtCore import Qt, pyqtSignal, QEvent
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QMouseEvent
+from pathlib import Path
+from itertools import islice
+from src.utils.isbn_validator import normalize_isbn
 
 PREVIEW_MAX_LINES = 20
 LARGE_FILE_THRESHOLD_BYTES = 20 * 1024 * 1024  # 20 MB
-INFO_SAMPLE_MAX_LINES = 200_000  # Max lines scanned for stats when the file exceeds LARGE_FILE_THRESHOLD_BYTES
+INFO_SAMPLE_MAX_LINES = 200_000
 
 
 class ClickableDropZone(QFrame):
@@ -160,19 +160,12 @@ class InputTab(QWidget):
         self._setup_ui()
 
     def _setup_ui(self):
-        """Build and arrange all child widgets for the input tab.
-
-        Wraps everything in a ``QScrollArea`` so the tab is usable at small window
-        heights.  The horizontal scrollbar is suppressed to avoid layout jitter when
-        the vertical scrollbar appears.
-        """
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
-        # Hide horizontal scrollbar so the content always fills the available width.
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
 
@@ -274,7 +267,7 @@ class InputTab(QWidget):
         layout.addStretch()
         scroll.setWidget(content)
         root_layout.addWidget(scroll)
-        self.advanced_mode = False  # Initialised here so set_advanced_mode can toggle it later
+        self.advanced_mode = False
 
     def set_advanced_mode(self, enabled):
         """Enable or disable advanced-mode features (no-op for now).
@@ -325,7 +318,6 @@ class InputTab(QWidget):
             return
 
         try:
-            # utf-8-sig strips the BOM silently if the file was saved by Excel.
             with open(self.input_file, 'r', encoding='utf-8-sig') as f:
                 lines = list(islice(f, PREVIEW_MAX_LINES))
                 preview_text = ''.join(lines)

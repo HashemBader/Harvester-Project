@@ -15,15 +15,15 @@ Key design points:
   augmented with a ``#CategoryHeader`` rule so category headings are visually
   distinct.
 """
-from PyQt6.QtWidgets import (  # Dialog container, layouts, and all visible widgets
+from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QScrollArea, QWidget, QFrame, QPushButton, QLineEdit
 )
-from PyQt6.QtCore import Qt  # Core Qt enums (alignment flags, etc.)
-import sys                   # sys.platform used for macOS key-notation detection
+from PyQt6.QtCore import Qt
+import sys
 
-from .theme_manager import ThemeManager              # Reads the persisted dark/light preference
-from .styles import generate_stylesheet, CATPPUCCIN_DARK, CATPPUCCIN_LIGHT  # Full QSS generation and palette dicts
+from .theme_manager import ThemeManager
+from .styles import generate_stylesheet, CATPPUCCIN_DARK, CATPPUCCIN_LIGHT
 
 
 class ShortcutItem(QFrame):

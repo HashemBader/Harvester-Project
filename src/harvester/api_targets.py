@@ -16,13 +16,13 @@ to LoC → Harvard → OpenLibrary.
 """
 from __future__ import annotations
 
-import json  # Parsing data/targets.json config file
-import logging  # Module-level logger for warnings and errors
-from dataclasses import dataclass  # Lightweight data class for ApiClientTarget
-from pathlib import Path  # OS-independent path handling for config file lookup
+import json
+import logging
+from dataclasses import dataclass
+from pathlib import Path
 
-from src.api.base_api import BaseApiClient, ApiResult  # Shared API client base class and result type
-from src.harvester.orchestrator import HarvestTarget, TargetResult, PlaceholderTarget  # Orchestrator interfaces
+from src.api.base_api import BaseApiClient, ApiResult
+from src.harvester.orchestrator import HarvestTarget, TargetResult, PlaceholderTarget
 
 logger = logging.getLogger(__name__)
 

@@ -18,18 +18,18 @@ Module-level constants:
         or ``None`` for tables without one.
     ``PAGE_SIZE`` — number of rows displayed per page.
 """
-import sqlite3  # Built-in database driver for reading the local harvest DB
-import re  # Regex used to normalise verbose error messages for display
+import sqlite3
+import re
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QTableWidget, QTableWidgetItem, QHeaderView,
     QTabWidget, QWidget, QSizePolicy, QComboBox
-)  # All Qt widget classes used to build the dialog UI
-from PyQt6.QtCore import Qt, QTimer  # Qt alignment/flag constants and debounce timer
+)
+from PyQt6.QtCore import Qt, QTimer
 
-from database import DatabaseManager  # Wraps the SQLite harvest database and exposes db_path
-from src.database.db_manager import yyyymmdd_to_iso_date  # Converts YYYYMMDD integers to ISO-8601 display strings
+from database import DatabaseManager
+from src.database.db_manager import yyyymmdd_to_iso_date
 
 # --- Table column definitions ---
 # Each entry maps a table name to the ordered list of columns that are both

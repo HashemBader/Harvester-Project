@@ -18,10 +18,10 @@ visible.
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QPushButton, QFrame, QTextEdit, QScrollArea, QWidget, QFormLayout
-)  # Qt widget classes used to construct the scrollable form layout
-from PyQt6.QtCore import Qt  # Core Qt enums (scroll-bar policy, alignment, cursor shape)
+)
+from PyQt6.QtCore import Qt
 
-from database import DatabaseManager  # Provides get_lowest_isbn, get_linked_isbns, upsert_linked_isbn, rewrite_to_lowest_isbn
+from database import DatabaseManager
 
 
 class LinkedIsbnDialog(QDialog):

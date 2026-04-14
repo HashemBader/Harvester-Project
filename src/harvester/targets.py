@@ -19,20 +19,20 @@ orchestrator does not need to know which concrete class to instantiate.
 
 from __future__ import annotations
 
-import logging  # Module-level logger for lookup errors and Z39.50 availability warnings
-from typing import Optional  # Optional type hints for call number fields
+import logging
+from typing import Optional
 
-from src.harvester.orchestrator import TargetResult  # Uniform result type returned by all targets
-from src.utils import messages  # Centralised user-facing message strings
-from src.utils.call_number_validators import validate_lccn, validate_nlmcn  # Normalise extracted call numbers
-from src.z3950.pyz3950_compat import ensure_pyz3950_importable  # Runtime PyZ3950 availability check
+from src.harvester.orchestrator import TargetResult
+from src.utils import messages
+from src.utils.call_number_validators import validate_lccn, validate_nlmcn
+from src.z3950.pyz3950_compat import ensure_pyz3950_importable
 
 logger = logging.getLogger(__name__)
 
 # Z3950 availability - will be checked lazily when needed
 # Don't import at module level to avoid crash if PyZ3950 has compatibility issues
-Z3950_AVAILABLE = None  # None = unchecked; True/False set on first lookup attempt
-Z3950Client = None  # Populated with the Z3950Client class after the first successful import
+Z3950_AVAILABLE = None
+Z3950Client = None
 
 
 class Z3950Target:
@@ -156,13 +156,7 @@ class LibraryOfCongressTarget:
         self.client = LocApiClient(timeout_seconds=timeout, max_retries=retries)
 
     def lookup(self, isbn: str) -> TargetResult:
-        """Query the Library of Congress JSON API for *isbn*.
-
-        Returns:
-            ``TargetResult(success=True, lccn=..., nlmcn=...)`` when the API
-            returns at least one call number; ``TargetResult(success=False, ...)``
-            on a not-found response or any network/API error.
-        """
+        """Lookup ISBN using Library of Congress API."""
         try:
             result = self.client.search(isbn)
 
@@ -211,13 +205,7 @@ class HarvardLibraryCloudTarget:
         self.client = HarvardApiClient(timeout_seconds=timeout, max_retries=retries)
 
     def lookup(self, isbn: str) -> TargetResult:
-        """Query the Harvard LibraryCloud metadata API for *isbn*.
-
-        Returns:
-            ``TargetResult(success=True, lccn=..., nlmcn=...)`` when the API
-            returns at least one call number; ``TargetResult(success=False, ...)``
-            on a not-found response or any network/API error.
-        """
+        """Lookup ISBN using Harvard LibraryCloud API."""
         try:
             result = self.client.search(isbn)
 
@@ -266,13 +254,7 @@ class OpenLibraryTarget:
         self.client = OpenLibraryApiClient(timeout_seconds=timeout, max_retries=retries)
 
     def lookup(self, isbn: str) -> TargetResult:
-        """Query the Internet Archive OpenLibrary API for *isbn*.
-
-        Returns:
-            ``TargetResult(success=True, lccn=..., nlmcn=...)`` when the API
-            returns at least one call number; ``TargetResult(success=False, ...)``
-            on a not-found response or any network/API error.
-        """
+        """Lookup ISBN using OpenLibrary API."""
         try:
             result = self.client.search(isbn)
 
@@ -308,15 +290,9 @@ class OpenLibraryTarget:
 
 
 class APITarget:
-    """Placeholder for unrecognised generic API targets.
-
-    Returned by ``create_target_from_config`` when the config names an API
-    target whose concrete class is not yet implemented.  Every ``lookup`` call
-    returns an immediate failure so the orchestrator can fall through to the
-    next target without a network round-trip.
-
-    Attributes:
-        name: Display name forwarded to ``TargetResult.source``.
+    """
+    Placeholder API target.
+    Will be replaced with real API implementations.
     """
 
     def __init__(self, name: str):
@@ -332,22 +308,16 @@ class APITarget:
 
 
 def create_target_from_config(target_config: dict):
-    """Instantiate the correct ``HarvestTarget`` subclass from a GUI config dict.
-
-    Name-based matching (``"library of congress"``, ``"harvard"``, etc.) takes
-    priority over the ``type`` field so well-known API targets are always
-    connected to their concrete client even if the config label includes a
-    suffix like ``"API"`` or ``"Library"``.
+    """
+    Create a target instance from GUI configuration.
 
     Args:
-        target_config: Dict with at minimum ``"name"`` and ``"type"`` keys.
-            Z39.50 entries also need ``"host"``, ``"port"``, and ``"database"``.
+        target_config: Dictionary with target configuration
+            Example: {"name": "Library of Congress", "type": "api", "selected": true, "rank": 1}
+            Or: {"name": "Yale", "type": "z3950", "host": "...", "port": 210, "database": "..."}
 
     Returns:
-        A concrete target instance implementing the ``HarvestTarget`` protocol.
-
-    Raises:
-        ValueError: If ``type`` is neither ``"api"`` nor ``"z3950"``.
+        Target instance that implements HarvestTarget protocol
     """
     name = str(target_config.get("name", "Unknown")).strip()
     target_type = str(target_config.get("type", "api")).strip().lower()

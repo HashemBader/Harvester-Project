@@ -24,17 +24,17 @@ Dependencies:
 """
 from __future__ import annotations
 
-import csv  # Parsing the tab-separated targets.tsv config file
-import json  # Parsing the JSON targets.json config file (fallback)
-import logging  # Module-level logger for config parse warnings
-import threading  # Thread-local storage for per-thread connection caches
-import time  # Rate-limit sleep between Z39.50 queries
-from dataclasses import dataclass  # Frozen dataclass for the immutable Z3950Target
-from pathlib import Path  # OS-independent path handling for config file locations
-from typing import Optional, Any  # Generic type hints
+import csv
+import json
+import logging
+import threading
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional, Any
 
-from src.harvester.orchestrator import HarvestTarget, TargetResult  # Orchestrator interfaces
-from src.z3950.pyz3950_compat import ensure_pyz3950_importable  # Runtime PyZ3950 availability check
+from src.harvester.orchestrator import HarvestTarget, TargetResult
+from src.z3950.pyz3950_compat import ensure_pyz3950_importable
 
 logger = logging.getLogger(__name__)
 

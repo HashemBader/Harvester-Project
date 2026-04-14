@@ -19,9 +19,9 @@ Stored keys:
     ``theme`` — ``"dark"`` or ``"light"`` (default ``"light"``).
     ``last_profile`` — Display name of the most recently active profile.
 """
-import json               # Reads and writes the settings JSON file
-from pathlib import Path  # OS-independent path to the data directory
-from typing import Literal  # Constrains return types to the exact strings "dark" / "light"
+import json
+from pathlib import Path
+from typing import Literal
 
 
 class ThemeManager:

@@ -14,34 +14,34 @@ Key responsibilities:
 - Register all global keyboard shortcuts.
 - Handle the window resize event that auto-collapses/expands the sidebar.
 """
-import logging  # Standard library logger used throughout this module
-import sys  # Platform detection for macOS keyboard-shortcut modifier
+import logging
+import sys
 
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
     QStackedWidget, QFrame, QStatusBar, QMessageBox, QButtonGroup, QScrollArea
-)  # Core Qt widget classes for building the main window layout
-from PyQt6.QtGui import QIcon, QAction, QKeySequence, QPixmap, QShortcut  # Icon, action, and keyboard-shortcut helpers
-from PyQt6.QtCore import Qt, QSize, pyqtSignal, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup  # Core Qt enums and animation classes
+)
+from PyQt6.QtGui import QIcon, QAction, QKeySequence, QPixmap, QShortcut
+from PyQt6.QtCore import Qt, QSize, pyqtSignal, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup
 
 # Import Tabs
-from .targets_config_tab import TargetsConfigTab  # Combined Configure + Targets page (page index 1)
-from .harvest_tab import HarvestTab  # Harvest run-control page (page index 2)
-from .dashboard import DashboardTab  # KPI / live-activity dashboard (page index 0)
-from .help_tab import HelpTab  # Keyboard reference and accessibility page (page index 3)
+from .targets_config_tab import TargetsConfigTab
+from .harvest_tab import HarvestTab
+from .dashboard import DashboardTab
+from .help_tab import HelpTab
 
 # Dialogs & Utils
-from .notifications import NotificationManager  # System-tray and in-app notification helpers
-from .styles import DEFAULT_STYLESHEET, generate_stylesheet, CATPPUCCIN_DARK, CATPPUCCIN_LIGHT  # Stylesheet generators and Catppuccin color palettes
+from .notifications import NotificationManager
+from .styles import DEFAULT_STYLESHEET, generate_stylesheet, CATPPUCCIN_DARK, CATPPUCCIN_LIGHT
 from .icons import (
-    get_icon, get_pixmap,
+    get_icon, get_pixmap, 
     SVG_DASHBOARD, SVG_TARGETS, SVG_SETTINGS, SVG_RESULTS,
     SVG_HARVEST, SVG_CHEVRON_LEFT, SVG_CHEVRON_RIGHT,
     SVG_TOGGLE_ON, SVG_TOGGLE_OFF, SVG_X_CIRCLE
-)  # SVG string constants and helpers that render icons at any color
-from src.config.profile_manager import ProfileManager  # Reads and persists named user profiles
-from src.database import DatabaseManager  # SQLite access layer; used here only for WAL checkpoint on close
-from .theme_manager import ThemeManager  # Persists the active light/dark theme choice across sessions
+)
+from src.config.profile_manager import ProfileManager
+from src.database import DatabaseManager
+from .theme_manager import ThemeManager
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,6 @@ class ModernMainWindow(QMainWindow):
     """
 
     def __init__(self):
-        """Initialise the main window, services, layout, and default theme."""
         super().__init__()
         self.setWindowTitle("LCCN Harvester")
         self.setGeometry(100, 100, 1380, 900)
@@ -115,30 +114,7 @@ class ModernMainWindow(QMainWindow):
             self.setStyleSheet(DEFAULT_STYLESHEET)
 
     def _setup_layout(self):
-        """Build the full sidebar + content layout and wire all initial state.
-
-        Creates and assembles the following widget tree::
-
-            QMainWindow
-            └── central_widget (QWidget)
-                └── main_layout (QHBoxLayout)
-                    ├── sidebar (QFrame, fixed 240 px)
-                    │   ├── header_frame — toggle chevron + "LCCN Pro" title
-                    │   ├── nav buttons — Configure, Harvest, Dashboard, Help
-                    │   ├── sidebar_status — harvester state pill
-                    │   ├── btn_theme — light/dark toggle
-                    │   └── btn_exit
-                    └── content_container (QWidget)
-                        ├── page_title (QLabel) — updates on navigation
-                        └── stack (QStackedWidget)
-                            ├── 0: DashboardTab
-                            ├── 1: TargetsConfigTab
-                            ├── 2: HarvestTab
-                            └── 3: HelpTab
-
-        After construction, signals are wired, initial profile/target state is
-        synced, and the Configure page is shown as the default view.
-        """
+        """Build the Sidebar + Content Layout."""
         # Main Container
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
@@ -607,8 +583,7 @@ class ModernMainWindow(QMainWindow):
         )
         self.dashboard_tab.record_harvest_event(isbn, status, message)
         
-        # Fall back to a full DB refresh only when live_stats_ready is absent,
-        # avoiding redundant DB reads while the faster live-stats stream is active.
+        # Real-time results update - only fall back to refresh if live_stats_ready is not connected
         if status in ("found", "failed", "cached", "skipped") and not getattr(self.harvest_tab, 'live_stats_ready', None):
             self.dashboard_tab.refresh_data()
 
@@ -708,7 +683,6 @@ class ModernMainWindow(QMainWindow):
     # --- Logic ---
 
     def _apply_advanced_mode(self):
-        """Push the current ``advanced_mode`` flag to every tab that supports it."""
         for tab in [self.dashboard_tab, self.targets_config_tab,
                    self.harvest_tab]:
             if hasattr(tab, 'set_advanced_mode'):
@@ -733,7 +707,7 @@ class ModernMainWindow(QMainWindow):
             stats: Dict containing harvest outcome counters and optional ``cancelled``
                    / ``error`` keys, or a non-dict value when unavailable.
         """
-        from datetime import datetime  # Deferred import; only needed when a harvest finishes
+        from datetime import datetime
         is_cancelled = isinstance(stats, dict) and stats.get("cancelled", False)
         has_error = isinstance(stats, dict) and bool(stats.get("error"))
         if success:
@@ -830,15 +804,9 @@ class ModernMainWindow(QMainWindow):
     def _apply_theme(self, theme: str):
         """Apply the requested color theme using the shared stylesheet helpers.
 
-        Generates the full application QSS from the appropriate Catppuccin
-        palette, applies it to the ``QApplication`` instance (or falls back to
-        ``self``), updates the theme-toggle button icon/label, persists the
-        selection via ``ThemeManager``, and notifies any tabs that maintain
-        their own inline theme-specific styles.
-
-        Args:
-            theme: ``"light"`` or ``"dark"``; invalid values fall back to the
-                   last persisted theme from ``ThemeManager``.
+        Strategy:
+        - Generate the complete application stylesheet based on the active mode.
+        - Persist the selection via ThemeManager.
         """
         try:
             mode = theme if isinstance(theme, str) and theme in ("dark", "light") else self._theme_manager.get_theme()
@@ -860,12 +828,12 @@ class ModernMainWindow(QMainWindow):
                 if hasattr(self, 'btn_exit'):
                     self.btn_exit.setIcon(get_icon(SVG_X_CIRCLE, CATPPUCCIN_DARK['text_muted']))
                 
-            from PyQt6.QtWidgets import QApplication  # Local import avoids a circular dependency at module level
+            from PyQt6.QtWidgets import QApplication
             app = QApplication.instance()
             if app:
-                app.setStyleSheet(qss)  # Apply globally so all top-level windows share the theme
+                app.setStyleSheet(qss)
             else:
-                self.setStyleSheet(qss)  # Fallback: no QApplication yet (e.g. during unit tests)
+                self.setStyleSheet(qss)
 
             # Persist selection
             try:
