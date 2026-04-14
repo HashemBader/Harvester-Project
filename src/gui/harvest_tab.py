@@ -72,11 +72,11 @@ from .harvest_support import (
     _safe_filename,
 )
 
-from src.harvester.marc_import import MarcImportService
+from src.harvester.marc_import import MarcImportService, ParsedMarcImportRecord
 from src.harvester.run_harvest import parse_isbn_file
 from src.database import DatabaseManager, now_datetime_str
 from src.config.profile_manager import ProfileManager
-from src.utils.isbn_validator import normalize_isbn
+from src.utils.isbn_validator import normalize_isbn, pick_lowest_isbn
 from .theme_manager import ThemeManager
 
 logger = logging.getLogger(__name__)
@@ -232,7 +232,7 @@ class HarvestTab(QWidget):
                 profile_name = self._profile_getter() or profile_name
             except Exception:
                 pass
-        self.lbl_active_profile.setText(f"Active profile: {profile_name}")
+        self.lbl_active_profile.setText(f"<b>Active profile: {profile_name}</b>")
 
     def on_targets_changed(self, targets):
         """Re-evaluate the Start button state when the user changes target selections.
@@ -328,15 +328,15 @@ class HarvestTab(QWidget):
         setup_grid.setSpacing(6)
         setup_grid.setColumnStretch(1, 1)
 
-        self.lbl_active_profile = QLabel("Active profile: Default Settings")
+        self.lbl_active_profile = QLabel("<b>Active profile: Default Settings</b>")
         self.lbl_active_profile.setProperty("class", "HelperText")
         self.lbl_active_profile.setToolTip("Runs use the active profile's Configure settings.")
+        self.lbl_active_profile.setTextFormat(Qt.TextFormat.RichText)
         setup_grid.addWidget(self.lbl_active_profile, 0, 0, 1, 2)
 
         lbl_input = QLabel("Input file:")
         lbl_input.setProperty("class", "HelperText")
-        file_input_layout = QHBoxLayout()
-        file_input_layout.setSpacing(6)
+        lbl_input.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
         self.file_path_edit = QLineEdit()
         self.file_path_edit.setPlaceholderText("No file selected… drag & drop or browse")
         self.file_path_edit.setReadOnly(True)
@@ -350,27 +350,30 @@ class HarvestTab(QWidget):
         self.btn_clear_file.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_clear_file.clicked.connect(self._clear_input)
         self.btn_clear_file.setVisible(False)
-        file_input_layout.addWidget(self.file_path_edit)
-        file_input_layout.addWidget(self.btn_clear_file)
-        file_input_layout.addWidget(self.btn_browse)
-        setup_grid.addWidget(lbl_input, 1, 0)
-        setup_grid.addLayout(file_input_layout, 1, 1)
-
-        self.chk_marc_only = QCheckBox("MARC only for this run")
-        self.chk_marc_only.setToolTip(
-            "Use the active Configure rules and search only records already imported into the local database"
-        )
-        self.chk_marc_only.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.chk_marc_only.setMinimumHeight(32)
-        self.chk_marc_only.toggled.connect(self._on_marc_only_toggled)
-        setup_grid.addWidget(self.chk_marc_only, 2, 1)
+        file_actions_row = QHBoxLayout()
+        file_actions_row.setSpacing(6)
+        file_actions_row.addStretch()
+        file_actions_row.addWidget(self.btn_clear_file)
+        file_actions_row.addWidget(self.btn_browse)
 
         self.chk_db_only = QCheckBox("Database only for this run")
         self.chk_db_only.setToolTip("Skip APIs and Z39.50 targets and search only the existing SQLite database")
         self.chk_db_only.setCursor(Qt.CursorShape.PointingHandCursor)
         self.chk_db_only.setMinimumHeight(32)
-        self.chk_db_only.toggled.connect(self._on_db_only_toggled)
-        setup_grid.addWidget(self.chk_db_only, 3, 1)
+        self.db_only_row = QFrame()
+        self.db_only_row.setProperty("class", "InlineOptionBar")
+        db_only_layout = QHBoxLayout(self.db_only_row)
+        db_only_layout.setContentsMargins(10, 2, 10, 2)
+        db_only_layout.setSpacing(0)
+        db_only_layout.addWidget(
+            self.chk_db_only,
+            alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+        db_only_layout.addStretch()
+        setup_grid.addWidget(lbl_input, 1, 0)
+        setup_grid.addWidget(self.file_path_edit, 1, 1)
+        setup_grid.addLayout(file_actions_row, 2, 1)
+        setup_grid.addWidget(self.db_only_row, 3, 1)
         self._apply_db_only_checkbox_style()
         input_layout.addLayout(setup_grid)
         input_layout.addStretch()
@@ -1055,33 +1058,19 @@ class HarvestTab(QWidget):
         style = (
             "QCheckBox {"
             "  color: " + text_color + ";"
-            "  font-size: 13px;"
-            "  font-weight: 700;"
-            "  spacing: 10px;"
-            "  padding: 5px 0;"
+            "  background: transparent;"
+            "  font-size: 12px;"
+            "  font-weight: 600;"
+            "  spacing: 8px;"
+            "  padding: 0;"
             "}"
             "QCheckBox::indicator {"
             "  width: 16px;"
             "  height: 16px;"
             "}"
         )
-        for checkbox in (getattr(self, "chk_marc_only", None), getattr(self, "chk_db_only", None)):
-            if checkbox is not None:
-                checkbox.setStyleSheet(style)
-
-    def _on_marc_only_toggled(self, checked: bool):
-        """Keep MARC-only and database-only run overrides mutually exclusive."""
-        if checked and hasattr(self, "chk_db_only") and self.chk_db_only.isChecked():
-            self.chk_db_only.blockSignals(True)
-            self.chk_db_only.setChecked(False)
-            self.chk_db_only.blockSignals(False)
-
-    def _on_db_only_toggled(self, checked: bool):
-        """Keep database-only and MARC-only run overrides mutually exclusive."""
-        if checked and hasattr(self, "chk_marc_only") and self.chk_marc_only.isChecked():
-            self.chk_marc_only.blockSignals(True)
-            self.chk_marc_only.setChecked(False)
-            self.chk_marc_only.blockSignals(False)
+        if getattr(self, "chk_db_only", None) is not None:
+            self.chk_db_only.setStyleSheet(style)
 
     def _load_file_preview(self):
         """Populate the preview table with the first 20 valid ISBN rows from the input file.
@@ -1362,15 +1351,9 @@ class HarvestTab(QWidget):
         # 2. Get Targets
         targets = self._targets_getter() if self._targets_getter else []
         selected_targets = [t for t in targets if t.get("selected", True)]
-        explicit_marc_only = self.chk_marc_only.isChecked()
         explicit_db_only = self.chk_db_only.isChecked()
 
-        if explicit_marc_only:
-            config["db_only"] = True
-            self.log_output.setText(
-                "MARC-only mode enabled for this run. Using the active profile rules."
-            )
-        elif explicit_db_only:
+        if explicit_db_only:
             config["db_only"] = True
             self.log_output.setText(
                 "Database-only mode enabled for this run. Skipping live targets."
@@ -2074,7 +2057,7 @@ class HarvestTab(QWidget):
         state: str = "running",
         visible: bool = True,
     ) -> None:
-        """Update the MARC-only progress bar without touching harvest state."""
+        """Update the MARC import progress bar without touching harvest state."""
         if not hasattr(self, "_marc_progress_bar"):
             return
 
@@ -2394,14 +2377,14 @@ class HarvestTab(QWidget):
 
         selected_rows = [
             (
-                record.isbns[0] if getattr(record, "isbns", ()) else "",
+                pick_lowest_isbn(record.isbns) if getattr(record, "isbns", ()) else "",
                 record.lccn,
                 record.nlmcn,
             )
             for record in parsed_records
+            if getattr(record, "isbns", ())
         ]
         written = len(selected_rows)
-        no_isbn = sum(1 for record in parsed_records if not getattr(record, "isbns", ()))
 
         marc_service = MarcImportService(
             db_path=db_path,
@@ -2506,11 +2489,11 @@ class HarvestTab(QWidget):
                 f"{_friendly_error(exc)}",
             )
 
-    def _parse_marc_records(self, path: str) -> list:
-        """Parse a binary MARC21 or MARCXML file and return (isbn, lccn, nlmcn) tuples.
+    def _parse_marc_records(self, path: str) -> list[ParsedMarcImportRecord]:
+        """Parse a binary MARC21 or MARCXML file into parsed MARC import records.
 
         Fields extracted per record:
-        - **020 $a / $z** — ISBN (preferred subfield $a; falls back to $z).
+        - **020 $a / $z** — one or more ISBNs in encounter order.
         - **050 $a + $b** — LC call number (LCCN).
         - **060 $a + $b** — NLM call number (NLMCN).
 
@@ -2519,27 +2502,25 @@ class HarvestTab(QWidget):
                   as MARCXML; all other extensions are treated as binary MARC21.
 
         Returns:
-            List of ``(isbn, lccn, nlmcn)`` tuples; any field may be ``None``.
+            List of ``ParsedMarcImportRecord`` objects.
         """
         import pymarc
         from src.utils.call_number_normalizer import normalize_call_number
 
         file_path = Path(path)
-        results = []
+        results: list[ParsedMarcImportRecord] = []
 
-        def _extract(record):
-            # ISBN: prefer 020 $a (primary ISBN); fall back to 020 $z (cancelled/invalid ISBN).
-            isbn = None
+        def _extract(record) -> ParsedMarcImportRecord:
+            # Keep every valid ISBN on the record so the GUI import path can
+            # use the same canonical/linked-ISBN behavior as the DB service.
+            isbns: list[str] = []
             for code in ("a", "z"):
                 for field in record.get_fields("020"):
                     for raw in field.get_subfields(code):
                         raw = raw.split()[0].replace("-", "").strip() if raw.split() else ""
                         norm = normalize_isbn(raw)
-                        if norm:
-                            isbn = norm
-                            break
-                if isbn:
-                    break
+                        if norm and norm not in isbns:
+                            isbns.append(norm)
 
             # LCCN from 050 $a + $b
             lccn = None
@@ -2557,7 +2538,7 @@ class HarvestTab(QWidget):
                 b_vals = f060[0].get_subfields("b")
                 nlmcn = normalize_call_number(a_vals, b_vals) or None
 
-            return isbn, lccn, nlmcn
+            return ParsedMarcImportRecord(isbns=tuple(isbns), lccn=lccn, nlmcn=nlmcn)
 
         if file_path.suffix.lower() == ".xml":
             # MARCXML path: pymarc parses the whole file into an array.
