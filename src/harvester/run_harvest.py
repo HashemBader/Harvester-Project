@@ -22,15 +22,15 @@ Multi-column files
 
 from __future__ import annotations
 
-import csv
-import logging
-from dataclasses import dataclass
-from pathlib import Path
+import csv  # Reading CSV and TSV ISBN input files
+import logging  # Module-level logger for parse and harvest warnings
+from dataclasses import dataclass  # Frozen/mutable result and stats DTOs
+from pathlib import Path  # OS-independent path handling for input files and DB
 
-from src.database import DatabaseManager
-from src.harvester.orchestrator import HarvestOrchestrator, HarvestTarget, ProgressCallback, CancelCheck
-from src.harvester.api_targets import build_default_api_targets
-from src.utils import isbn_validator
+from src.database import DatabaseManager  # SQLite database initialisation and access
+from src.harvester.orchestrator import HarvestOrchestrator, HarvestTarget, ProgressCallback, CancelCheck  # Core harvest engine and callback types
+from src.harvester.api_targets import build_default_api_targets  # Default HTTP API target factory
+from src.utils import isbn_validator  # ISBN normalisation and validation helpers
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +82,7 @@ class ParsedISBNFile:
     linked: dict = None  # primary_isbn -> [variant_isbn, ...] (empty if single-column file)
 
     def __post_init__(self):
+        """Replace the ``None`` sentinel with an empty dict so callers can always iterate ``linked``."""
         if self.linked is None:
             self.linked = {}
 
@@ -130,8 +131,7 @@ def parse_isbn_file(input_path: Path, max_lines: int = 0) -> ParsedISBNFile:
     valid_count = 0
     linked_map: dict[str, list[str]] = {}  # primary_isbn -> [linked_variant, ...]
 
-    suffix = input_path.suffix.lower()
-
+    suffix = input_path.suffix.lower()  # Determines which parser branch to use below
 
     if suffix in {".xlsx", ".xls"}:
         try:
