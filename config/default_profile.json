@@ -32,7 +32,7 @@
       "concurrent_requests": 5,
       "rate_limit": 10
     },
-    "last_marc_import_source": "sru2"
+    "last_marc_import_source": "ma"
   },
-  "last_modified": "2026-04-14T10:36:49.390218"
+  "last_modified": "2026-04-10T11:38:31.411445"
 }

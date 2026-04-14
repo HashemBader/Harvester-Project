@@ -388,12 +388,6 @@ QLabel[class="HelperText"], QLabel.HelperText {{
     border: none;
 }}
 
-QFrame[class="InlineOptionBar"] {{
-    background-color: {t['surface2']};
-    border-radius: 3px;
-    border: none;
-}}
-
 /* --- Status Pills ---
    Pills are display-only badges rendered via QLabel rather than QPushButton.
    The base rule is intentionally colourless (text_muted); the [state="..."]

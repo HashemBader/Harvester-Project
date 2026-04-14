@@ -181,19 +181,20 @@ def _select_marc_values_for_mode(
 
 
 def _prepare_marc_import_records(
-    records: list[ParsedMarcImportRecord],
+    records: list[tuple[str | None, str | None, str | None]],
     *,
     mode: str,
     source_name: str,
 ) -> tuple[list[tuple[str, str | None, str | None]], list[ParsedMarcImportRecord], int, int, int]:
     """Filter and transform raw MARC tuples for DB persistence and TSV export.
 
-    Iterates over parsed MARC records, selects only the call-number fields
-    relevant to *mode* via ``_select_marc_values_for_mode``, and skips any
-    record that has no usable call number for the chosen mode.
+    Iterates over ``(isbn, lccn, nlmcn)`` tuples, selects only the call-number
+    fields relevant to *mode* via ``_select_marc_values_for_mode``, and skips
+    any record that has no usable call number for the chosen mode.
 
     Args:
-        records: List of parsed MARC records from ``_parse_marc_records``.
+        records: List of ``(isbn, lccn, nlmcn)`` tuples from ``_parse_marc_records``;
+                 any field may be ``None``.
         mode: Import mode — ``"lccn"``, ``"nlmcn"``, or ``"both"``.
         source_name: Human-readable source label stored on each DB record.
 
@@ -203,8 +204,8 @@ def _prepare_marc_import_records(
         - ``parsed_records``: List of ``ParsedMarcImportRecord`` objects for DB persistence.
         - ``written``: Number of records included (had a call number for the mode).
         - ``skipped``: Number of records excluded (no call number for the mode).
-        - ``no_isbn``: Number of records that had a call number for the mode but
-          no usable ISBN, so they are excluded from both the TSV and DB import.
+        - ``no_isbn``: Number of included records that had no ISBN (written to DB
+          but not linkable to a harvester record).
     """
     selected_rows: list[tuple[str, str | None, str | None]] = []
     parsed_records: list[ParsedMarcImportRecord] = []
@@ -213,8 +214,8 @@ def _prepare_marc_import_records(
     no_isbn = 0
     normalized_mode = (mode or "lccn").strip().lower()
 
-    for record in records:
-        selected_lccn, selected_nlmcn = _select_marc_values_for_mode(record.lccn, record.nlmcn, normalized_mode)
+    for isbn, lccn, nlmcn in records:
+        selected_lccn, selected_nlmcn = _select_marc_values_for_mode(lccn, nlmcn, normalized_mode)
         selected_lccn = validate_lccn(selected_lccn) if selected_lccn else None
         selected_nlmcn = validate_nlmcn(selected_nlmcn) if selected_nlmcn else None
 
@@ -234,12 +235,11 @@ def _prepare_marc_import_records(
         if not normalized_isbn:
             # Record is written to DB but cannot be linked to a harvester entry.
             no_isbn += 1
-            continue
 
-        selected_rows.append((pick_lowest_isbn(normalized_isbns), selected_lccn, selected_nlmcn))
+        selected_rows.append((normalized_isbn, selected_lccn, selected_nlmcn))
         parsed_records.append(
             ParsedMarcImportRecord(
-                isbns=normalized_isbns,
+                isbns=(normalized_isbn,) if normalized_isbn else tuple(),
                 lccn=selected_lccn,
                 nlmcn=selected_nlmcn,
                 source=source_name,
