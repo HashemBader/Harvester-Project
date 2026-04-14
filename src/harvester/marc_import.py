@@ -27,20 +27,20 @@ Classes:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Iterable, Optional
-import xml.etree.ElementTree as ET
+from dataclasses import dataclass  # Immutable DTOs for parsed records and summary counts
+from pathlib import Path  # OS-independent path handling for the default DB path
+from typing import Iterable, Optional  # Generic type hints used throughout
+import xml.etree.ElementTree as ET  # Parsing MARC-XML records
 
-from src.config.profile_manager import ProfileManager
-from src.database.db_manager import DatabaseManager, MainRecord, now_datetime_str, normalize_to_yyyymmdd_int
-from src.utils.isbn_validator import pick_lowest_isbn
-from src.utils.call_number_validators import validate_call_numbers
+from src.config.profile_manager import ProfileManager  # Persisting the last import source to the active profile
+from src.database.db_manager import DatabaseManager, MainRecord, now_datetime_str, normalize_to_yyyymmdd_int  # DB access and date helpers
+from src.utils.isbn_validator import pick_lowest_isbn  # Canonical-ISBN selection for linked-ISBN deduplication
+from src.utils.call_number_validators import validate_call_numbers  # Normalise and validate LCCN/NLMCN strings
 from src.utils.marc_parser import (
-    extract_call_numbers_from_json,
-    extract_call_numbers_from_xml,
-    extract_isbns_from_json,
-    extract_isbns_from_xml,
+    extract_call_numbers_from_json,  # Pull MARC 050/060 from a JSON record dict
+    extract_call_numbers_from_xml,   # Pull MARC 050/060 from an XML element
+    extract_isbns_from_json,         # Pull all ISBN values from a JSON record dict
+    extract_isbns_from_xml,          # Pull all ISBN values from an XML element
 )
 
 
@@ -97,6 +97,15 @@ class MarcImportService:
         profile_manager: Optional[ProfileManager] = None,
         profile_name: Optional[str] = None,
     ):
+        """Initialise the service with a database path and optional profile context.
+
+        Args:
+            db_path:         Path to the SQLite database file.
+            profile_manager: When provided, the active profile is updated with the
+                             last import source name after each ``persist_records`` call.
+            profile_name:    Override the active profile name; resolved from
+                             ``profile_manager`` at import time when ``None``.
+        """
         self.db = DatabaseManager(db_path)
         self.profile_manager = profile_manager
         self.profile_name = profile_name
@@ -291,6 +300,8 @@ class MarcImportService:
             if attempted_batch:
                 self.db.upsert_attempted_many(conn, attempted_batch)
             if source_file_name and source_file_hash:
+                # Record the file provenance so re-imports of the same source can be
+                # detected and skipped if the file hash hasn't changed.
                 conn.execute(
                     """
                     INSERT INTO marc_imports (source_name, file_name, file_hash, imported_at)

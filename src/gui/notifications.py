@@ -13,14 +13,14 @@ for maximum visibility, regardless of tray availability.
 ``NotificationPreferences`` handles loading/saving per-user preferences from
 ``data/notification_prefs.json``.
 """
-import logging
-import platform
-import subprocess
-from pathlib import Path
+import logging           # Standard library logging for error/info messages
+import platform          # Detects the current OS (Darwin/Windows/Linux)
+import subprocess        # Spawns osascript / notify-send for native OS notifications
+from pathlib import Path  # OS-independent filesystem path handling
 
-from PyQt6.QtWidgets import QSystemTrayIcon, QMenu, QMessageBox
-from PyQt6.QtGui import QIcon, QAction
-from PyQt6.QtCore import QObject, pyqtSignal
+from PyQt6.QtWidgets import QSystemTrayIcon, QMenu, QMessageBox  # Tray icon, context menu, and modal error dialogs
+from PyQt6.QtGui import QIcon, QAction                           # App icon and menu actions
+from PyQt6.QtCore import QObject, pyqtSignal                     # Base QObject and custom signal support
 
 logger = logging.getLogger(__name__)
 
@@ -40,14 +40,24 @@ class NotificationManager(QObject):
     notification_clicked = pyqtSignal()
 
     def __init__(self, main_window=None):
+        """Initialise the manager and detect the host OS.
+
+        Args:
+            main_window: The application's main window; used as parent for
+                modal error dialogs and tray icon ownership.
+        """
         super().__init__()
         self.main_window = main_window
-        self.system = platform.system()
-        self.tray_icon = None
+        self.system = platform.system()  # Cached once; used by _show_native_notification
+        self.tray_icon = None            # Created lazily in setup_system_tray
         self.notifications_enabled = True
 
     def setup_system_tray(self):
-        """Setup system tray icon and menu."""
+        """Create the system-tray icon, load its image, and attach a context menu.
+
+        Exits early without error if the platform does not support a system tray
+        (e.g. some minimal Linux desktop environments).
+        """
         if not QSystemTrayIcon.isSystemTrayAvailable():
             logger.info("System tray not available.")
             return
@@ -104,12 +114,21 @@ class NotificationManager(QObject):
             self.main_window.activateWindow()
 
     def _on_tray_activated(self, reason):
-        """Handle tray icon activation."""
+        """Handle tray icon activation events (single click, double-click, etc.).
+
+        Args:
+            reason: The ``QSystemTrayIcon.ActivationReason`` enum value describing
+                how the icon was activated.
+        """
         if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
             self._show_window()
 
     def _toggle_notifications(self, checked):
-        """Toggle notifications on/off."""
+        """Toggle global notification delivery on or off.
+
+        Args:
+            checked: ``True`` to enable notifications; ``False`` to suppress them.
+        """
         self.notifications_enabled = checked
 
     def show_notification(self, title, message, notification_type="info", duration=5000):
@@ -176,7 +195,11 @@ class NotificationManager(QObject):
     # Convenience methods for common notification types
 
     def notify_harvest_started(self, isbn_count):
-        """Notify when harvest starts."""
+        """Show an info notification indicating a harvest has begun.
+
+        Args:
+            isbn_count: Number of ISBNs queued for the run.
+        """
         self.show_notification(
             "Harvest Started",
             f"Processing {isbn_count} ISBNs...",
@@ -184,7 +207,12 @@ class NotificationManager(QObject):
         )
 
     def notify_harvest_completed(self, stats):
-        """Notify when harvest completes successfully."""
+        """Show a success notification summarising the completed harvest run.
+
+        Args:
+            stats: Dict containing at least ``found``, ``failed``, and ``total``
+                integer counts from the harvest result.
+        """
         found = stats.get('found', 0)
         failed = stats.get('failed', 0)
         total = stats.get('total', 0)
@@ -199,7 +227,11 @@ class NotificationManager(QObject):
         )
 
     def notify_harvest_error(self, error_message):
-        """Notify when harvest encounters an error."""
+        """Show an error dialog for a fatal harvest failure.
+
+        Args:
+            error_message: Human-readable description of the error.
+        """
         self.show_notification(
             "Harvest Error",
             f"An error occurred: {error_message}",
@@ -211,7 +243,15 @@ class NotificationManager(QObject):
         """Milestone notifications are intentionally suppressed (disabled by client request)."""
 
     def notify_isbn_found(self, isbn, lccn):
-        """Notify when an LCCN is found (optional, can be disabled for bulk)."""
+        """Show a brief success notification for a single ISBN-to-LCCN resolution.
+
+        Intended for interactive use; callers should suppress this during
+        bulk runs to avoid notification spam.
+
+        Args:
+            isbn: The ISBN that was looked up.
+            lccn: The LCCN that was resolved.
+        """
         self.show_notification(
             "LCCN Found",
             f"ISBN {isbn}\n→ {lccn}",
@@ -220,7 +260,11 @@ class NotificationManager(QObject):
         )
 
     def notify_cache_hit(self, count):
-        """Notify about cache efficiency."""
+        """Show an info notification reporting the number of cache hits.
+
+        Args:
+            count: Number of results served from the local cache.
+        """
         self.show_notification(
             "Cache Hit",
             f"⚡ {count} results loaded from cache",
@@ -229,7 +273,12 @@ class NotificationManager(QObject):
         )
 
     def notify_api_error(self, api_name, error):
-        """Notify when an API fails."""
+        """Show a warning notification for a recoverable API failure.
+
+        Args:
+            api_name: Display name of the API target that failed.
+            error: Short error description or exception message.
+        """
         self.show_notification(
             f"{api_name} Error",
             f"API temporarily unavailable: {error}",
@@ -238,7 +287,12 @@ class NotificationManager(QObject):
         )
 
     def notify_export_complete(self, filename, record_count):
-        """Notify when export completes."""
+        """Show a success notification confirming a data export finished.
+
+        Args:
+            filename: Path or name of the exported file.
+            record_count: Number of records written to the file.
+        """
         self.show_notification(
             "Export Complete",
             f"✓ Exported {record_count} records\n→ {filename}",
@@ -255,12 +309,17 @@ class NotificationPreferences:
     """
 
     def __init__(self):
+        """Initialise and load preferences from disk, falling back to defaults."""
         self.preferences_file = Path("data/notification_prefs.json")
         self.prefs = self._load_preferences()
 
     def _load_preferences(self):
-        """Load notification preferences."""
-        import json
+        """Load preferences from disk, merging over hard-coded defaults.
+
+        Returns:
+            A dict of preference keys with their current or default values.
+        """
+        import json  # Imported locally to avoid a module-level dependency
 
         defaults = {
             "enabled": True,
@@ -284,8 +343,8 @@ class NotificationPreferences:
         return defaults
 
     def save_preferences(self):
-        """Save notification preferences."""
-        import json
+        """Persist the current in-memory preferences dict to the JSON file."""
+        import json  # Imported locally to avoid a module-level dependency
 
         try:
             self.preferences_file.parent.mkdir(parents=True, exist_ok=True)
@@ -295,10 +354,23 @@ class NotificationPreferences:
             logger.exception("Failed to save notification preferences.")
 
     def set_preference(self, key, value):
-        """Set a preference value."""
+        """Update a single preference and immediately persist the change.
+
+        Args:
+            key: The preference key to update.
+            value: The new value to store.
+        """
         self.prefs[key] = value
         self.save_preferences()
 
     def get_preference(self, key, default=None):
-        """Get a preference value."""
+        """Return the value for *key*, or *default* if it is not set.
+
+        Args:
+            key: The preference key to look up.
+            default: Fallback value returned when the key is absent.
+
+        Returns:
+            The stored preference value, or *default*.
+        """
         return self.prefs.get(key, default)

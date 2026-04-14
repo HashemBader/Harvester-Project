@@ -9,10 +9,10 @@ The splitter is initialised with a 150/650 ratio so the compact settings row
 receives just enough height while the target table gets most of the space.
 """
 
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QSplitter
-from PyQt6.QtCore import Qt, pyqtSignal
-from .targets_tab import TargetsTab
-from .config_tab import ConfigTab
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QSplitter  # Base widget, layout, and resizable pane divider
+from PyQt6.QtCore import Qt, pyqtSignal                      # Orientation enum and custom signal declarations
+from .targets_tab import TargetsTab   # Lower pane: Z39.50 / API target table
+from .config_tab import ConfigTab     # Upper pane: profile settings card
 
 
 class TargetsConfigTab(QWidget):
@@ -34,6 +34,7 @@ class TargetsConfigTab(QWidget):
     profile_changed = pyqtSignal(str)
 
     def __init__(self):
+        """Initialise the splitter, build the UI, and wire internal signals."""
         super().__init__()
         self._setup_ui()
         self._connect_internal_signals()

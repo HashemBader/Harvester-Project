@@ -27,29 +27,29 @@ Threading model:
   no additional lock is needed for these flags.
 """
 
-from __future__ import annotations
+from __future__ import annotations  # Allow PEP 604 union syntax on Python 3.9
 
-import csv
-import logging
-import re
-import threading
-from datetime import datetime, timedelta
-from pathlib import Path
+import csv  # Writing TSV/CSV output files
+import logging  # Module-level logger for debug/error output
+import re  # Regex used for filename sanitisation and call-number parsing
+import threading  # Provides Lock for thread-safe file writes
+from datetime import datetime, timedelta  # Computing next-retry dates
+from pathlib import Path  # OS-independent filesystem path handling
 
-from PyQt6.QtCore import QThread, QTimer, pyqtSignal
-from PyQt6.QtGui import QDragEnterEvent, QDropEvent
-from PyQt6.QtWidgets import QGroupBox, QMessageBox
+from PyQt6.QtCore import QThread, QTimer, pyqtSignal  # Background thread, delayed callbacks, custom signals
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent  # Drag-and-drop event types
+from PyQt6.QtWidgets import QGroupBox, QMessageBox  # GroupBox widget and warning dialogs
 
-from src.config.profile_manager import ProfileManager
-from src.database import DatabaseManager, now_datetime_str
-from src.database.date_utils import classification_from_call_number
-from src.database.db_manager import yyyymmdd_to_iso_date
-from src.harvester.marc_import import ParsedMarcImportRecord
-from src.harvester.orchestrator import HarvestCancelled
-from src.harvester.run_harvest import RunStats, parse_isbn_file, run_harvest
-from src.harvester.targets import create_target_from_config
-from src.utils import messages
-from src.utils.call_number_validators import validate_lccn, validate_nlmcn
+from src.config.profile_manager import ProfileManager  # Reading active profile settings
+from src.database import DatabaseManager, now_datetime_str  # DB access and current-timestamp helper
+from src.database.date_utils import classification_from_call_number  # LC/NLM classification prefix extraction
+from src.database.db_manager import yyyymmdd_to_iso_date  # Integer date → ISO-8601 string conversion
+from src.harvester.marc_import import ParsedMarcImportRecord  # Typed record for MARC import DB persistence
+from src.harvester.orchestrator import HarvestCancelled  # Exception raised on user-requested cancellation
+from src.harvester.run_harvest import RunStats, parse_isbn_file, run_harvest  # Core harvest entry point and types
+from src.harvester.targets import create_target_from_config  # Factory that instantiates target objects from dicts
+from src.utils import messages  # Centralised user-facing message strings
+from src.utils.call_number_validators import validate_lccn, validate_nlmcn  # Call-number format validators
 
 logger = logging.getLogger(__name__)
 
@@ -219,10 +219,11 @@ def _prepare_marc_import_records(
         selected_lccn = validate_lccn(selected_lccn) if selected_lccn else None
         selected_nlmcn = validate_nlmcn(selected_nlmcn) if selected_nlmcn else None
 
+        # A record is kept only when it has a validated call number for the chosen mode.
         if normalized_mode == "nlmcn":
             keep = bool(selected_nlmcn)
         elif normalized_mode == "both":
-            keep = bool(selected_lccn or selected_nlmcn)
+            keep = bool(selected_lccn or selected_nlmcn)  # Either field is sufficient
         else:
             keep = bool(selected_lccn)
 
@@ -232,6 +233,7 @@ def _prepare_marc_import_records(
 
         normalized_isbn = str(isbn or "").replace("-", "").strip()
         if not normalized_isbn:
+            # Record is written to DB but cannot be linked to a harvester entry.
             no_isbn += 1
 
         selected_rows.append((normalized_isbn, selected_lccn, selected_nlmcn))
@@ -666,6 +668,12 @@ class HarvestWorker(QThread):
             handle.flush()  # Flush after each row so the file is readable mid-harvest.
 
     def _write_invalid_live_rows(self, invalid_list):
+        """Write one TSV row per invalid ISBN to the ``"invalid"`` output bucket.
+
+        Args:
+            invalid_list: Iterable of raw (non-normalised) ISBN strings that failed
+                          validation; safe to pass ``None`` (treated as empty).
+        """
         for raw_isbn in invalid_list or []:
             self._append_live_row("invalid", [raw_isbn])
 
@@ -730,6 +738,21 @@ class HarvestWorker(QThread):
         nlmcn=None,
         nlmcn_source=None,
     ):
+        """Construct a TSV row for a successfully resolved ISBN.
+
+        The column set mirrors ``_successful_headers``: LCCN-only, NLM-only, or
+        both depending on ``call_number_mode``.
+
+        Args:
+            isbn: The resolved ISBN (hyphens are stripped before writing).
+            lccn: LC call number, or ``None``.
+            lccn_source: Name of the target that supplied the LCCN.
+            nlmcn: NLM call number, or ``None``.
+            nlmcn_source: Name of the target that supplied the NLMCN.
+
+        Returns:
+            List of cell values aligned with the headers from ``_successful_headers``.
+        """
         classification = _extract_lc_classification(lccn or "")
         nlm_classification = _extract_call_number_classification(nlmcn or "")
         date_added = _display_date(now_datetime_str())
@@ -959,6 +982,22 @@ class HarvestWorker(QThread):
         offline_targets=None,
         other_errors=None,
     ):
+        """Write infrastructure-problem rows to the problems TSV for each affected target.
+
+        "Not found" outcomes are intentionally excluded — they are normal negative
+        catalogue results, not infrastructure issues.  The fallback branch (last
+        ``if`` block) handles legacy events that carry a single ``source``/``reason``
+        pair rather than categorised target lists.
+
+        Args:
+            source: Top-level target or ``"RetryRule"`` (skipped entirely).
+            reason: Raw failure reason used by the fallback branch.
+            not_found_targets: Targets that returned a genuine not-found response
+                               (excluded from problem reporting).
+            z3950_unsupported_targets: Targets where Z39.50 is unavailable.
+            offline_targets: Targets that were unreachable or timed out.
+            other_errors: List of ``"target: reason"`` strings for uncategorised errors.
+        """
         if source == "RetryRule":
             return
 
@@ -978,6 +1017,8 @@ class HarvestWorker(QThread):
             if normalized_problem:
                 self._append_live_problem(target_name, normalized_problem)
 
+        # Fallback: older events supply a single source/reason rather than
+        # categorised lists, so use those directly when no lists were provided.
         if (
             not not_found_targets
             and not (z3950_unsupported_targets or [])
@@ -991,6 +1032,16 @@ class HarvestWorker(QThread):
                 self._append_live_problem(source, normalized_problem)
 
     def _split_problem_item(self, item):
+        """Split a ``"target: reason"`` string into a ``(target, reason)`` tuple.
+
+        Args:
+            item: A string in the form ``"TargetName: error description"``, or any
+                  plain string when no colon separator is present.
+
+        Returns:
+            Tuple of ``(target_name, problem_description)``.  Falls back to
+            ``("Unknown", item)`` when no ``": "`` separator is found.
+        """
         text = str(item or "").strip()
         if ": " in text:
             return text.split(": ", 1)
@@ -1083,6 +1134,7 @@ class HarvestWorker(QThread):
             selected_targets = [target for target in self.targets if target.get("selected", True)]
             if not selected_targets:
                 return []
+            # Lower rank values run first (rank 999 = unset, sorted to the end).
             sorted_targets = sorted(selected_targets, key=lambda item: item.get("rank", 999))
             try:
                 global_timeout = int(self.advanced_settings.get("connection_timeout", 0))
@@ -1097,8 +1149,10 @@ class HarvestWorker(QThread):
             for target_config in sorted_targets:
                 try:
                     cfg = dict(target_config)
+                    # Only override per-target timeout when an advanced global value was supplied.
                     if global_timeout > 0:
                         cfg["timeout"] = global_timeout
+                    # global_retries == 0 is a valid override (disable retries), so check >= 0.
                     if global_retries >= 0:
                         cfg["max_retries"] = global_retries
                     target_instances.append(create_target_from_config(cfg))
@@ -1110,6 +1164,8 @@ class HarvestWorker(QThread):
                         )
                     )
 
+            # Return None (not []) so callers can distinguish "no targets configured"
+            # from "all target instantiations failed".
             return target_instances if target_instances else None
 
         except Exception as exc:
@@ -1167,10 +1223,21 @@ class DroppableGroupBox(QGroupBox):
     file_dropped = pyqtSignal(str)
 
     def __init__(self, title, parent=None, *, accepted_extensions=None, invalid_message=None):
+        """Initialise the group box and configure drag-and-drop acceptance.
+
+        Args:
+            title: Group box title string.
+            parent: Optional parent widget.
+            accepted_extensions: Iterable of lowercase extension strings (e.g.
+                ``(".tsv", ".csv")``); defaults to the five standard input types.
+            invalid_message: Warning text shown when the dropped file type is not
+                accepted; uses a sensible default when omitted.
+        """
         super().__init__(title, parent)
         self.setAcceptDrops(True)
         self.setObjectName("DroppableArea")
         self.setProperty("dropState", "normal")
+        # Convert to a tuple so ``str.endswith`` can accept it directly.
         self._accepted_extensions = tuple(
             ext.lower() for ext in (accepted_extensions or (".tsv", ".txt", ".csv", ".xlsx", ".xls"))
         )
@@ -1204,6 +1271,11 @@ class DroppableGroupBox(QGroupBox):
         self._update_state("normal")
 
     def dropEvent(self, event: QDropEvent):
+        """Accept the first valid file and emit ``file_dropped``, or warn and ignore.
+
+        Shows a brief ``"dropped"`` state flash (500 ms) then resets to ``"normal"``.
+        Displays a warning dialog when no dropped file has an accepted extension.
+        """
         files = [url.toLocalFile() for url in event.mimeData().urls()]
         # Filter to recognised input-file extensions only.
         valid_files = [path for path in files if path.lower().endswith(self._accepted_extensions)]

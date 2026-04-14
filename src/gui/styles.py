@@ -189,11 +189,11 @@ QFrame#Sidebar {{
 }}
 
 QLabel#SidebarTitle {{
-    color: {t['primary']}; 
+    color: {t['primary']}; /* Primary blue ties the app name to the brand accent */
     font-size: 18px;
     font-weight: 800;
     padding: 20px 0;
-    margin-bottom: 20px;
+    margin-bottom: 20px; /* Creates breathing room between the title and the first nav item */
     qproperty-alignment: AlignCenter;
 }}
 
@@ -238,26 +238,30 @@ QPushButton[class="NavButton"]:focus, QPushButton.NavButton:focus, QPushButton#N
     color: {t['text']};
 }}
 
-/* Tooltips */
+/* Tooltips
+   Hard-coded black/white is intentional — tooltips must be legible on both
+   the dark and light themes without re-theming; a fixed high-contrast pair
+   achieves this without a conditional.  The primary-colour border anchors
+   the tooltip visually to the active theme accent.                        */
 QToolTip {{
-    background-color: #000000;
-    color: #ffffff;
-    border: 1px solid {t['primary']};
+    background-color: #000000; /* Fixed black — readable over any theme background */
+    color: #ffffff;            /* Fixed white — maximum contrast on the black bg */
+    border: 1px solid {t['primary']}; /* Accent border ties tooltip chrome to the theme */
     padding: 4px 8px;
-    border-radius: 4px;
+    border-radius: 4px; /* Softens the tooltip box to match the general 8px rounding language */
 }}
 
 /* --- Header / Content --- */
 QWidget#ContentArea {{
-    background-color: {t['bg']};
+    background-color: {t['bg']}; /* Matches the app background so the content area blends seamlessly */
 }}
 
 QLabel#PageTitle {{
-    font-size: 26px;
+    font-size: 26px;  /* Larger than card titles to establish a clear typographic hierarchy */
     font-weight: 800;
     color: {t['text']};
-    margin-bottom: 20px;
-    letter-spacing: 0.2px;
+    margin-bottom: 20px; /* Separates the page heading from the first card below it */
+    letter-spacing: 0.2px; /* Slight tracking improves readability at large sizes */
 }}
 
 /* --- Cards / Panels: The Space Context ---
@@ -285,16 +289,16 @@ QFrame#LivePanel {{
 }}
 
 QLabel[class="CardTitle"], QLabel.CardTitle {{
-    color: {t['text_muted']}; 
-    font-size: 14px; 
+    color: {t['text_muted']}; /* Muted so the card value (number) is the visual focal point */
+    font-size: 14px;          /* Smaller than the value label to maintain visual hierarchy */
     font-weight: 700;
     letter-spacing: 0.2px;
 }}
 
 QLabel[class="CardValue"], QLabel.CardValue {{
     color: {t['text']};
-    font-size: 32px; 
-    font-weight: 800;
+    font-size: 32px;  /* Large numeric display — the primary information on a stat card */
+    font-weight: 800; /* Extra-bold so the number reads instantly at a glance */
 }}
 
 QLabel[class="CardHelper"], QLabel.CardHelper {{
@@ -302,23 +306,25 @@ QLabel[class="CardHelper"], QLabel.CardHelper {{
     font-size: 11px;
 }}
 
-/* --- Database Browser Tabs --- */
+/* --- Database Browser Tabs ---
+   Scoped to #DatabaseBrowserTabs so these overrides only affect the
+   browser dialog and do not accidentally restyle other QTabWidgets.    */
 QTabWidget#DatabaseBrowserTabs::pane {{
     border: 1px solid {t['border']};
     border-radius: 8px;
-    top: -1px;
+    top: -1px; /* Pulls the pane up by 1px so the selected tab's bottom border merges with the pane border */
 }}
 
 QTabWidget#DatabaseBrowserTabs QTabBar::tab {{
-    background-color: {t['surface2']};
-    color: {t['text_muted']};
+    background-color: {t['surface2']}; /* Slightly raised surface so inactive tabs read as "behind" the pane */
+    color: {t['text_muted']};          /* Muted text signals these tabs are inactive */
     border: 1px solid {t['border']};
     border-bottom: 1px solid {t['border']};
-    border-top-left-radius: 8px;
+    border-top-left-radius: 8px;  /* Only round the top corners — bottom attaches flush to the pane */
     border-top-right-radius: 8px;
-    min-width: 120px;
+    min-width: 120px;  /* Ensures tab labels never collapse to unreadable widths */
     padding: 10px 18px;
-    margin-right: 6px;
+    margin-right: 6px; /* Gap between tabs to make them visually distinct units */
     font-size: 13px;
     font-weight: 800;
 }}
@@ -330,10 +336,10 @@ QTabWidget#DatabaseBrowserTabs QTabBar::tab:hover {{
 }}
 
 QTabWidget#DatabaseBrowserTabs QTabBar::tab:selected {{
-    background-color: {t['primary']};
-    color: #ffffff;
+    background-color: {t['primary']}; /* Solid accent fill makes the active table immediately obvious */
+    color: #ffffff;                   /* White on blue for WCAG-compliant contrast on the selected tab */
     border: 1px solid {t['primary']};
-    border-bottom: 1px solid {t['primary']};
+    border-bottom: 1px solid {t['primary']}; /* Matches the pane border so tab and pane appear as one surface */
 }}
 
 QLabel[class="ActivityLabel"], QLabel.ActivityLabel {{
@@ -344,7 +350,7 @@ QLabel[class="ActivityLabel"], QLabel.ActivityLabel {{
 
 QLabel[class="ActivityValue"], QLabel.ActivityValue {{
     color: {t['text']};
-    font-family: Menlo, Monaco, 'Courier New', monospace;
+    font-family: Menlo, Monaco, 'Courier New', monospace; /* Monospace keeps numeric columns aligned vertically */
     font-size: 13px;
 }}
 
@@ -363,7 +369,7 @@ QLabel[class="DropIcon"], QLabel.DropIcon {{
 QLabel[class="DropText"], QLabel.DropText {{
     font-size: 14px;
     font-weight: bold;
-    color: {t['warning']};
+    color: {t['warning']}; /* Amber signals "action needed" without being an error */
     border: none;
     background: transparent;
 }}
@@ -419,10 +425,13 @@ QLabel[class="StatusPill"][state="idle"], QLabel.StatusPill[state="idle"] {{
     color: {t['text_muted']};
 }}
 
-/* --- Controls: Inputs --- */
+/* --- Controls: Inputs ---
+   All editable input types share the same base rule for visual consistency.
+   The focus rule widens the border to 2px so it is clearly visible without
+   changing the widget's layout dimensions (border grows inward in QSS).   */
 QLineEdit, QSpinBox, QTextEdit, QPlainTextEdit {{
-    background-color: {t['bg']}; 
-    border: 1px solid {t['border']}; 
+    background-color: {t['bg']};     /* Input sits on the base bg, visually inset below panels */
+    border: 1px solid {t['border']}; /* Thin border provides affordance without being dominant */
     border-radius: 8px;
     padding: 12px;
     color: {t['text']};
@@ -430,12 +439,12 @@ QLineEdit, QSpinBox, QTextEdit, QPlainTextEdit {{
 }}
 
 QLineEdit:focus, QSpinBox:focus, QTextEdit:focus, QPlainTextEdit:focus {{
-    border: 2px solid {t['focus']};
-    background-color: {t['surface']};
+    border: 2px solid {t['focus']};   /* 2px focus ring makes keyboard-focused inputs clearly visible */
+    background-color: {t['surface']}; /* Slight bg lift on focus reinforces that the field is active */
 }}
 
 QLineEdit:read-only {{
-    background-color: {t['surface2']};
+    background-color: {t['surface2']}; /* Distinct fill communicates the field is not editable */
     color: {t['text_muted']};
     border: 1px solid {t['border']};
 }}
@@ -547,9 +556,9 @@ QListView#ResultFormatComboPopup::item:selected {{
 QComboBox::drop-down {{
     subcontrol-origin: padding;
     subcontrol-position: top right;
-    width: 32px;
-    border-left: 1px solid {t['border_strong']};
-    border-top-right-radius: 8px;
+    width: 32px;                             /* Enough room for a 16px icon with comfortable hit area */
+    border-left: 1px solid {t['border_strong']}; /* Divider visually separates the arrow zone from the text */
+    border-top-right-radius: 8px;    /* Matches the parent combo border-radius so corners align */
     border-bottom-right-radius: 8px;
     background: transparent;
 }}
@@ -566,11 +575,12 @@ QComboBox::down-arrow:on, QComboBox::down-arrow:hover, QComboBox::down-arrow:foc
 }}
 
 /* Rank column combo — tighter padding than the global QComboBox rule so the
-   numeric rank fits inside the narrow cell width in the targets table.   */
+   numeric rank fits inside the narrow cell width in the targets table.
+   max-width: 64px caps it to the fixed column width so it never overflows. */
 QComboBox#RankCombo {{
-    padding: 4px 24px 4px 8px;
-    min-width: 52px;
-    max-width: 64px;
+    padding: 4px 24px 4px 8px; /* 24px right-pad leaves room for the drop-down arrow zone */
+    min-width: 52px;            /* Wide enough for two-digit rank numbers */
+    max-width: 64px;            /* Capped to match the fixed targets-table rank column width */
 }}
 QListView#RankComboPopup {{
     background-color: {t['surface']};
@@ -615,39 +625,41 @@ QSpinBox::up-arrow:hover, QSpinBox::down-arrow:hover {{
 }}
 
 
-/* Scroll Areas */
+/* Scroll Areas
+   Transparent background prevents the scroll area from painting its own
+   background rectangle on top of the parent card's background colour.   */
 QScrollArea[class="ScrollArea"], QScrollArea.ScrollArea {{
-    background: transparent;
-    border: none;
+    background: transparent; /* Inherits parent card surface instead of painting its own bg */
+    border: none;            /* Cards provide their own border; a second border here would double-border */
 }}
 
 /* Drag Zone (Input) */
 QFrame#DragZone, QFrame[class="DragZone"] {{
-    border: 2px dashed {t['border_strong']}; 
-    background-color: {t['surface']}14; 
-    border-radius: 16px;
+    border: 2px dashed {t['border_strong']}; /* Dashed border is the conventional drop-target affordance */
+    background-color: {t['surface']}14;      /* "14" is hex 20 — 8% opacity tint, just visible enough */
+    border-radius: 16px;                     /* Larger radius than cards gives the zone a friendlier, open shape */
 }}
 QFrame#DragZone:hover, QFrame[class="DragZone"]:hover {{
-    background-color: {t['hover']}26;
-    border-color: {t['focus']};
+    background-color: {t['hover']}26; /* "26" is hex 38 — 15% opacity, brighter than idle to signal readiness */
+    border-color: {t['focus']};       /* Focus blue on hover signals the zone is ready to accept a drop */
 }}
 
 QFrame[class="DragZone"][state="ready"] {{
-    border: 3px dashed {t['warning']};
+    border: 3px dashed {t['warning']}; /* Amber dashed border: file loaded, awaiting confirmation */
     background-color: {t['surface']};
 }}
 QFrame[class="DragZone"][state="ready"]:hover {{
     background-color: {t['hover']}26;
-    border-color: {t['warning']};
+    border-color: {t['warning']}; /* Keep amber on hover so colour meaning stays consistent */
 }}
 
 QFrame[class="DragZone"][state="active"] {{
-    border: 3px dashed {t['primary']};
-    background-color: {t['surface2']};
+    border: 3px dashed {t['primary']}; /* Blue dashed: drag is in progress over the zone */
+    background-color: {t['surface2']}; /* Slightly raised surface acknowledges the active drag */
 }}
 
 QFrame[class="DragZone"][state="success"] {{
-    border: 3px solid {t['primary']};
+    border: 3px solid {t['primary']};  /* Solid (not dashed) border signals the file has been accepted */
     background-color: {t['surface2']};
 }}
 
@@ -719,8 +731,8 @@ QScrollBar::handle:horizontal {{
 QScrollBar::handle:horizontal:hover {{
     background-color: {t['border_strong']};
 }}
-QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
-QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
+QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }} /* Hide scroll arrow buttons — not needed with modern mice/trackpads */
+QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}   /* Remove the trough fill between the handle and the scroll arrows */
 
 /* --- BUTTON SYSTEM (VIBRANT) ---
    Three named variants sit above the base QPushButton rule:
@@ -731,14 +743,14 @@ QScrollBar::add-page, QScrollBar::sub-page {{ background: none; }}
    the same compatibility reason as NavButton above.                     */
 
 QPushButton {{
-    background-color: {t['surface2']};
+    background-color: {t['surface2']}; /* Neutral surface fill: identifiable as a button without demanding attention */
     color: {t['text']};
-    border-radius: 8px;
+    border-radius: 8px;                /* Consistent with input rounding — keeps all interactive elements cohesive */
     padding: 10px 20px;
     font-weight: 700;
     font-size: 14px;
-    border: 1px solid {t['border_strong']};
-    outline: none;
+    border: 1px solid {t['border_strong']}; /* Stronger border than cards so buttons read as interactive */
+    outline: none;                          /* Remove the OS default dotted focus rectangle — focus is styled via :focus */
 }}
 
 QPushButton:hover {{
@@ -759,15 +771,15 @@ QPushButton:focus {{
 /* 1. Primary: Blue Fill */
 QPushButton[class="PrimaryButton"], QPushButton.PrimaryButton, QPushButton#PrimaryButton {{
     background-color: {t['primary']};
-    color: #ffffff; 
-    border: 1px solid transparent;
+    color: #ffffff;                    /* White text ensures WCAG AA contrast on the blue fill */
+    border: 1px solid transparent;    /* Transparent border keeps layout stable when state borders are added */
 }}
 QPushButton[class="PrimaryButton"]:hover, QPushButton.PrimaryButton:hover, QPushButton#PrimaryButton:hover {{
     background-color: {t['focus']};
 }}
 QPushButton[class="PrimaryButton"]:pressed, QPushButton.PrimaryButton:pressed, QPushButton#PrimaryButton:pressed {{
     background-color: {t['primary']};
-    margin-top: 1px;
+    margin-top: 1px; /* 1px downward shift simulates a physical button press without a real shadow */
 }}
 QPushButton[class="PrimaryButton"]:disabled, QPushButton.PrimaryButton:disabled, QPushButton#PrimaryButton:disabled {{
     background-color: {t['hover']};
@@ -794,8 +806,8 @@ QPushButton[class="SecondaryButton"]:disabled, QPushButton.SecondaryButton:disab
 /* 3. Danger: Red Fill */
 QPushButton[class="DangerButton"], QPushButton.DangerButton, QPushButton#DangerButton {{
     background-color: {t['danger']};
-    color: #ffffff; 
-    border: 1px solid transparent;
+    color: #ffffff;                  /* White text on red maintains contrast and matches PrimaryButton convention */
+    border: 1px solid transparent;  /* Transparent border keeps layout dimensions stable across states */
 }}
 QPushButton[class="DangerButton"]:hover, QPushButton.DangerButton:hover, QPushButton#DangerButton:hover {{
     background-color: {t['focus']};
@@ -806,12 +818,14 @@ QPushButton[class="DangerButton"]:disabled, QPushButton.DangerButton:disabled, Q
     border: none;
 }}
 
-/* Dashboard Profile Dock (right-side utility component) */
+/* Dashboard Profile Dock (right-side utility component)
+   border-top is 2px (vs 1px sides) to mimic a raised-top effect,
+   adding subtle depth without a real box-shadow.                   */
 QFrame#DashboardProfilePanel {{
     background-color: {t['surface']};
     border: 1px solid {t['border']};
-    border-top: 2px solid {t['border_strong']};
-    border-radius: 14px;
+    border-top: 2px solid {t['border_strong']}; /* Heavier top edge creates a visual "lift" on the panel */
+    border-radius: 14px;                         /* Larger radius than cards gives the dock a pill-like softness */
 }}
 
 QFrame#DashboardProfilePanel:hover {{
@@ -822,15 +836,15 @@ QFrame#DashboardProfilePanel:hover {{
 QLabel#DashboardProfileIcon {{
     background: transparent;
     border: none;
-    border-radius: 9px;
+    border-radius: 9px; /* Slight radius clips the icon corners to match the panel's rounded shape */
     padding: 0;
 }}
 
 QLabel#DashboardProfileEyebrow {{
     color: {t['text_muted']};
-    font-size: 10px;
+    font-size: 10px;          /* Smaller than body text — this is a label-above-label ("eyebrow") pattern */
     font-weight: 800;
-    letter-spacing: 0.9px;
+    letter-spacing: 0.9px;    /* Wide tracking gives all-caps or short eyebrow text better readability */
 }}
 
 QLabel#DashboardProfileMeta {{
@@ -841,13 +855,13 @@ QLabel#DashboardProfileMeta {{
 
 QComboBox#DashboardProfileCombo {{
     min-height: 40px;
-    padding: 6px 42px 6px 12px;
-    border-radius: 12px;
+    padding: 6px 42px 6px 12px; /* 42px right-pad reserves room for the custom drop-down arrow button */
+    border-radius: 12px;         /* Rounder than standard combos to fit the dock's softer aesthetic */
     background-color: {t['bg']};
     border: 1px solid {t['border']};
     color: {t['text']};
     font-weight: 600;
-    selection-background-color: {t['primary']};
+    selection-background-color: {t['primary']}; /* Blue selection highlight in editable mode */
     selection-color: #ffffff;
 }}
 
@@ -872,7 +886,7 @@ QComboBox#DashboardProfileCombo::drop-down {{
 }}
 
 QComboBox#DashboardProfileCombo::down-arrow {{
-    image: none;
+    image: none; /* The profile combo uses a custom icon label instead of an SVG arrow */
     width: 0;
     height: 0;
 }}
@@ -889,11 +903,11 @@ QComboBox#DashboardProfileCombo:on::drop-down {{
 QPushButton#DashboardProfileAction {{
     min-height: 40px;
     padding: 8px 16px;
-    border-radius: 10px;
+    border-radius: 10px;                         /* Slightly rounder than default buttons to match the dock panel */
     background-color: {t['surface']};
-    color: {t['text_muted']};
+    color: {t['text_muted']};                    /* Muted text reduces visual weight for a secondary action */
     border: 1px solid {t['border']};
-    border-top: 1px solid {t['border_strong']};
+    border-top: 1px solid {t['border_strong']};  /* Stronger top edge echoes the panel's raised-top treatment */
     font-weight: 700;
 }}
 
@@ -907,21 +921,25 @@ QPushButton#DashboardProfileAction:pressed {{
     background-color: {t['surface2']};
 }}
 
-/* Harvester Banner Success State */
+/* Harvester Banner Success State
+   The entire banner background turns green on completion so the outcome
+   is visible at a glance without needing to read the status text.       */
 QFrame#HarvestBanner[state="completed"] {{
-    background-color: {t['success']};
-    border: 1px solid {t['success']};
+    background-color: {t['success']}; /* Full green fill makes a completed harvest unmissable */
+    border: 1px solid {t['success']}; /* Matching border removes the contrast gap at the edges */
 }}
 
 QFrame#HarvestBanner[state="completed"] QLabel {{
     color: {t['text']};
 }}
 
-/* --- Links & Utilities --- */
+/* --- Links & Utilities ---
+   LinkButton renders as inline hyperlink text — no background or border so
+   it visually blends into surrounding body copy.                          */
 QPushButton[class="LinkButton"], QPushButton.LinkButton {{
-    color: {t['primary']};
-    text-decoration: underline;
-    background: transparent;
+    color: {t['primary']};          /* Primary blue matches conventional hyperlink colour */
+    text-decoration: underline;     /* Underline distinguishes it from plain label text */
+    background: transparent;        /* No fill so the button sits inline without a box */
     border: none;
 }}
 QPushButton[class="LinkButton"]:hover, QPushButton.LinkButton:hover {{
@@ -931,7 +949,7 @@ QPushButton[class="LinkButton"]:hover, QPushButton.LinkButton:hover {{
 QFrame[class="Divider"], QFrame.Divider {{
     color: {t['border']};
     background-color: {t['border']};
-    min-height: 1px;
+    min-height: 1px; /* min + max both 1px forces the QFrame to be a single-pixel horizontal rule */
     max-height: 1px;
 }}
 
@@ -1025,30 +1043,35 @@ QPushButton[class="IconButton"]:hover, QPushButton.IconButton:hover {{
     border-color: {t['primary']};
 }}
 
-/* --- Group Boxes --- */
+/* --- Group Boxes ---
+   margin-top + padding-top create the inset zone where the title label
+   overlaps the top border — the standard QSS group-box title technique. */
 QGroupBox {{
     background-color: {t['surface']};
     border: 1px solid {t['border']};
     border-radius: 8px;
-    margin-top: 14px;
-    padding-top: 14px;
+    margin-top: 14px;    /* Leaves space above the border for the title to sit in */
+    padding-top: 14px;   /* Pushes group content below the title label */
 }}
 QGroupBox::title {{
-    subcontrol-origin: margin;
+    subcontrol-origin: margin; /* Positions the title relative to the margin area, not the border */
     subcontrol-position: top left;
-    left: 10px;
-    padding: 0 4px;
+    left: 10px;                /* Indents the title slightly from the left border */
+    padding: 0 4px;            /* Horizontal padding clears the border behind the title text */
     color: {t['text_muted']};
     font-weight: bold;
     font-size: 13px;
 }}
 
-/* --- Harvest Tab Status Box --- */
+/* --- Harvest Tab Status Box ---
+   The 4px left border is the primary status indicator — its colour changes
+   per state (see sub-rules below) so users can scan the status at a glance
+   without reading the text.                                               */
 QFrame[class="HarvestStatus"], QFrame.HarvestStatus {{
     background-color: {t['surface']};
     border-radius: 8px;
     border: 1px solid {t['border_strong']};
-    border-left: 4px solid {t['border']};
+    border-left: 4px solid {t['border']}; /* Thicker left accent; colour is overridden per harvest state */
 }}
 QFrame[class="HarvestStatus"][state="ready"], QFrame.HarvestStatus[state="ready"] {{
     border-left-color: {t['primary']};
@@ -1110,43 +1133,46 @@ QLabel[class="StatusText"][state="completed"], QLabel.StatusText[state="complete
     color: {t['success']};
 }}
 
+/* ActiveToggle: toggles a target row between enabled (green) and disabled (red).
+   Hover always shows focus-blue so the affordance remains obvious regardless of
+   the current active/inactive state.                                           */
 QPushButton#ActiveToggle[state="active"] {{
-    background-color: {t['success']};
+    background-color: {t['success']}; /* Green signals the target is currently enabled */
     border: none;
     border-radius: 6px;
 }}
 QPushButton#ActiveToggle[state="active"]:hover {{
-    background-color: {t['focus']};
+    background-color: {t['focus']}; /* Blue on hover hints that a click will change the state */
 }}
 QPushButton#ActiveToggle[state="inactive"] {{
-    background-color: {t['danger']};
+    background-color: {t['danger']}; /* Red signals the target is currently disabled */
     border: none;
     border-radius: 6px;
 }}
 QPushButton#ActiveToggle[state="inactive"]:hover {{
-    background-color: {t['focus']};
+    background-color: {t['focus']}; /* Same blue-hover intent as the active state above */
 }}
 
 /* --- Shortcuts Dialog --- */
 QFrame[class="ShortcutItem"] {{
     background: {t['surface']};
     border: 1px solid {t['border']};
-    border-radius: 6px;
+    border-radius: 6px; /* Small radius keeps the shortcut rows compact and scannable */
     padding: 8px;
-    margin: 4px;
+    margin: 4px;        /* Small gap between rows prevents them from merging into a block */
 }}
 QFrame[class="ShortcutItem"]:hover {{
     background: {t['hover']};
-    border: 1px solid {t['primary']};
+    border: 1px solid {t['primary']}; /* Accent border on hover signals the item is interactive */
 }}
 QLabel#ShortcutKeys {{
-    background: {t['bg']};
-    color: {t['primary']};
+    background: {t['bg']};  /* Inset background makes the key badge look like a rendered key cap */
+    color: {t['primary']};  /* Blue text draws the eye to the key sequence first */
     font-size: 12px;
     font-weight: bold;
     padding: 6px 12px;
     border-radius: 4px;
-    min-width: 120px;
+    min-width: 120px;       /* Fixed min-width keeps key badges aligned across all rows */
 }}
 QLabel#ShortcutDesc {{
     color: {t['text']};
@@ -1173,8 +1199,8 @@ QLabel#CategoryHeader {{
     font-size: 16px;
     font-weight: bold;
     padding: 8px;
-    border-bottom: 2px solid {t['border_strong']};
-    margin-top: 10px;
+    border-bottom: 2px solid {t['border_strong']}; /* Underline visually separates each category group */
+    margin-top: 10px; /* Extra top margin spaces categories apart when the list is scrolled */
 }}
 
 /* --- Harvest Tab: Stat Tiles (File Statistics + MARC) ---
@@ -1182,19 +1208,19 @@ QLabel#CategoryHeader {{
    "Records Found").  StatTileValue / StatTileValueSmall differ only in
    font-size so smaller numbers don't need a separate widget class.      */
 QWidget[class="StatTile"] {{
-    background-color: {t['surface2']};
+    background-color: {t['surface2']}; /* Slightly raised surface distinguishes stat tiles from the page bg */
     border-radius: 8px;
     border: 1px solid {t['border']};
 }}
 QLabel[class="StatTileValue"] {{
-    font-size: 22px;
+    font-size: 22px;    /* Prominent number display — large but smaller than dashboard CardValue (32px) */
     font-weight: 700;
     color: {t['text']};
-    background: transparent;
+    background: transparent; /* Inherits the StatTile background without painting its own rectangle */
     border: none;
 }}
 QLabel[class="StatTileValueSmall"] {{
-    font-size: 20px;
+    font-size: 20px;    /* Slightly smaller variant for tiles where the number can be longer */
     font-weight: 700;
     color: {t['text']};
     background: transparent;
@@ -1214,20 +1240,24 @@ QLabel[class="StatTileLabelSmall"] {{
     border: none;
 }}
 
-/* --- Harvest Tab: MARC Status Banner --- */
+/* --- Harvest Tab: MARC Status Banner ---
+   Inline info strip shown beneath the MARC import controls to report
+   the current parser state (e.g. "File loaded", "Parsing…").         */
 QLabel[class="MarcStatusBanner"] {{
-    background-color: {t['surface2']};
+    background-color: {t['surface2']}; /* Slightly raised bg frames the status text as a distinct info strip */
     border-radius: 6px;
     padding: 8px 12px;
-    font-size: 12px;
+    font-size: 12px;   /* Smaller than body text — secondary information, not the primary focus */
     color: {t['text_muted']};
 }}
 
-/* --- Harvest Tab: MARC Drop Zone --- */
+/* --- Harvest Tab: MARC Drop Zone ---
+   Dashed border is the conventional drag-and-drop affordance; surface2
+   background gives it a subtle inset appearance inside the card.      */
 QFrame[class="MarcDropZone"] {{
-    border: 2px dashed {t['border_strong']};
+    border: 2px dashed {t['border_strong']}; /* Dashed style distinguishes drop targets from solid-bordered cards */
     border-radius: 8px;
-    background-color: {t['surface2']};
+    background-color: {t['surface2']}; /* Slightly recessed surface cues users to "drop something here" */
 }}
 """
 

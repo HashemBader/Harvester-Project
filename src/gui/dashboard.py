@@ -21,26 +21,26 @@ Design notes:
   (``"idle"``, ``"running"``, ``"paused"``, ``"success"``, ``"error"``) so
   QSS can colour it without any inline style overrides.
 """
-import logging
-from datetime import datetime
-from pathlib import Path
+import logging  # Module-level logger for dashboard refresh errors
+from datetime import datetime  # Timestamps recent-result entries
+from pathlib import Path  # OS-independent filesystem path handling
 
-from PyQt6.QtWidgets import (
+from PyQt6.QtWidgets import (  # Core layout and widget classes used throughout the dashboard
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QBoxLayout, QLabel, QFrame,
     QComboBox, QPushButton, QSizePolicy, QMessageBox, QStackedWidget,
     QLineEdit, QTextEdit, QFormLayout
 )
-from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QUrl
-from PyQt6.QtGui import QDesktopServices
+from PyQt6.QtCore import Qt, QTimer, QSize, pyqtSignal, QUrl  # Enums, 2-second refresh timer, signals, and URL helpers
+from PyQt6.QtGui import QDesktopServices  # Opens result files and folders in the default OS application
 
-from src.database import DatabaseManager
-from .combo_boxes import ConsistentComboBox
-from .icons import (
+from src.database import DatabaseManager  # Shared SQLite handle for linked-ISBN queries
+from .combo_boxes import ConsistentComboBox  # Project-standard combo that keeps a consistent drop-down width
+from .icons import (  # Icon helpers and SVG source strings for KPI card icons and the folder button
     get_icon, get_pixmap, SVG_ACTIVITY, SVG_CHECK_CIRCLE, SVG_ALERT_CIRCLE,
     SVG_X_CIRCLE, SVG_DASHBOARD, SVG_FOLDER_OPEN
 )
-from .database_browser_dialog import DatabaseBrowserDialog
-from .dashboard_components import (
+from .database_browser_dialog import DatabaseBrowserDialog  # Modal dialog for browsing the harvester DB
+from .dashboard_components import (  # Reusable dashboard sub-widgets and utility helpers
     DashboardCard,
     ProfileSwitchCombo,
     RecentResultsPanel,
@@ -49,7 +49,7 @@ from .dashboard_components import (
     truncate_text,
 )
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)  # Logs dashboard refresh exceptions without crashing the UI
 
 
 class DashboardTab(QWidget):
@@ -88,6 +88,7 @@ class DashboardTab(QWidget):
     cancel_harvest_requested = pyqtSignal()
 
     def __init__(self):
+        """Initialise shared state, build the UI, and start the 2-second refresh timer."""
         super().__init__()
         # Shared database manager; init_db() is idempotent so it is safe to call at construction.
         self.db = DatabaseManager()
@@ -980,7 +981,9 @@ class DashboardTab(QWidget):
         if isinstance(stats, dict):
             summary_keys = {"found", "cached", "failed", "skipped", "invalid"}
             if summary_keys.intersection(stats):
+                # "cached" means a call number was retrieved from a linked ISBN — still a success.
                 successful = cls._int_stat(stats.get("found")) + cls._int_stat(stats.get("cached"))
+                # "skipped" (retry window not yet expired) is counted in the Failed KPI, not ignored.
                 failed = cls._int_stat(stats.get("failed")) + cls._int_stat(stats.get("skipped"))
                 return {
                     "processed": successful + failed,
@@ -988,12 +991,14 @@ class DashboardTab(QWidget):
                     "failed": failed,
                     "invalid": cls._int_stat(stats.get("invalid")),
                 }
+            # Newer harvest_finished payloads wrap the RunStats object under a "run_stats" key.
             embedded_stats = stats.get("run_stats")
             if hasattr(embedded_stats, "processed_unique"):
-                stats = embedded_stats
+                stats = embedded_stats  # Unwrap so the RunStats branch below handles it.
             else:
                 return {"processed": 0, "successful": 0, "failed": 0, "invalid": 0}
 
+        # RunStats dataclass path: presence of ``processed_unique`` is the sentinel attribute.
         if hasattr(stats, "processed_unique"):
             successful = cls._int_stat(getattr(stats, "found", 0)) + cls._int_stat(getattr(stats, "cached", 0))
             failed = cls._int_stat(getattr(stats, "failed", 0)) + cls._int_stat(getattr(stats, "skipped", 0))
@@ -1108,6 +1113,9 @@ class DashboardTab(QWidget):
         ``ModernMainWindow`` can iterate over all tabs uniformly.
         """
 
+    # NOTE: The three methods below (set_running, set_paused, set_idle) are superseded by
+    # the fuller definitions later in this class that also manage the Pause/Cancel buttons.
+    # Python keeps only the last definition; these remain here for reference during merges.
     def set_running(self):
         """Switch the dashboard status pill to RUNNING and reset in-session counters.
 
@@ -1161,8 +1169,13 @@ class DashboardTab(QWidget):
             self.lbl_run_status.setProperty("state", "idle")
         self._refresh_status_style()
         
+    # ── Active harvest-state methods (these override the stubs above) ─────────
     def set_running(self):
-        """Switch the dashboard status pill to RUNNING and enable live controls."""
+        """Switch the dashboard status pill to RUNNING and enable live controls.
+
+        Also resets in-session counters and enables the Pause and Cancel buttons
+        with their harvest-active inline styles.
+        """
         self._is_running = True
         self.session_stats = {
             "processed": 0,
@@ -1175,6 +1188,7 @@ class DashboardTab(QWidget):
         self._refresh_result_file_buttons()
         self.btn_pause_harvest.setText("Pause")
         self.btn_pause_harvest.setEnabled(True)
+        # Orange inline style indicates an interruptible active operation.
         self.btn_pause_harvest.setStyleSheet(
             "background-color: #f97316; color: #ffffff; border: 1px solid #ea580c; "
             "border-radius: 10px; font-weight: 700; padding: 8px 16px;"
@@ -1185,9 +1199,14 @@ class DashboardTab(QWidget):
         self._refresh_status_style()
 
     def set_paused(self, is_paused: bool):
-        """Update the dashboard status pill and controls for pause/resume."""
+        """Update the dashboard status pill and controls for pause/resume.
+
+        Args:
+            is_paused: ``True`` to show PAUSED state, ``False`` to show RUNNING.
+        """
         self.btn_pause_harvest.setText("Resume" if is_paused else "Pause")
         self.btn_pause_harvest.setEnabled(True)
+        # Blue = harvest is paused (button offers Resume); orange = harvest is running (button offers Pause).
         self.btn_pause_harvest.setStyleSheet(
             "background-color: #2563eb; color: #ffffff; border: 1px solid #1d4ed8; "
             "border-radius: 10px; font-weight: 700; padding: 8px 16px;"
@@ -1205,12 +1224,18 @@ class DashboardTab(QWidget):
         self._refresh_status_style()
 
     def set_idle(self, success: bool | None = None):
-        """Transition the dashboard status pill to a terminal or idle state."""
+        """Transition the dashboard status pill to a terminal or idle state.
+
+        Also disables and resets the Pause/Cancel buttons to their resting appearance.
+
+        Args:
+            success: ``True`` → COMPLETED, ``False`` → Cancelled/Error, ``None`` → IDLE.
+        """
         self._is_running = False
         self._refresh_result_file_buttons()
         self.btn_pause_harvest.setText("Pause")
         self.btn_pause_harvest.setEnabled(False)
-        self.btn_pause_harvest.setStyleSheet("")
+        self.btn_pause_harvest.setStyleSheet("")  # Clear inline style; theme QSS handles the disabled appearance.
         self.btn_cancel_harvest.setEnabled(False)
         if success is True:
             self.lbl_run_status.setText("● COMPLETED")
