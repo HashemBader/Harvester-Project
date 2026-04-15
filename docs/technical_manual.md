@@ -99,7 +99,7 @@ Key points:
 
 - The database is shared across profiles.
 - Profiles separate settings, targets, and output folders.
-- `gui_settings.json` stores the persisted theme selection and related GUI-preference keys.
+- `gui_settings.json` stores theme and related GUI-preference keys.
 - Output files are timestamped, so runs do not overwrite one another.
 
 ---
@@ -123,7 +123,7 @@ Key points:
 
 - The app opens on the `Configure` page.
 - The sidebar shows navigation buttons in this order: `Configure`, `Harvest`, `Dashboard`, `Help`. Below those is a status pill showing the current run state. At the bottom are a `Toggle Theme` button and an `Exit` button. A collapse button in the sidebar header hides the text labels.
-- Theme selection is restored from `ThemeManager` on launch and persisted in `data/gui_settings.json`.
+- Theme changes are written through `ThemeManager` to `data/gui_settings.json`, but the app currently starts in light mode on launch.
 - The system tray menu exposes `Show Window`, `Enable Notifications`, and `Quit`.
 - The dashboard database browser is read-only and supports search, source filtering, and pagination.
 - The Help page resolves repository-hosted documentation links, including the accessibility statement, against the current checkout when Git metadata is available.

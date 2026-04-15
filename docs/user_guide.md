@@ -62,9 +62,8 @@ The app opens on the `Configure` page.
 
 From source:
 
-```bash
-python app_entry.py
-```
+- macOS / Linux: `python3 app_entry.py`
+- Windows PowerShell: `py .\app_entry.py`
 
 ---
 
