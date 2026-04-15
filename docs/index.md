@@ -10,4 +10,5 @@ This folder contains the maintained project documentation for LCCN Harvester.
 - [cli_reference.md](cli_reference.md): Reference for the command-line utility.
 - [technical_manual.md](technical_manual.md): Internal architecture, storage, and runtime behavior.
 - [contribution_guide.md](contribution_guide.md): Developer setup and contribution notes.
-- [WCAG_ACCESSIBILITY.md](WCAG_ACCESSIBILITY.md): Accessibility notes and limitations.
+- [WCAG_ACCESSIBILITY.md](WCAG_ACCESSIBILITY.md): Accessibility notes and current self-assessed coverage.
+- [WCAG_SELF_CHECK_REPORT.md](WCAG_SELF_CHECK_REPORT.md): Internal accessibility self-check summary.

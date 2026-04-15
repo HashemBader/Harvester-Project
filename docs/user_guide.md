@@ -14,10 +14,10 @@ For plain-language definitions of ISBNs, call numbers, MARC, caching, and linked
   - [Switch profiles](#switch-profiles)
 - [Configure: Targets](#configure-targets)
 - [Configure: Harvest Settings](#configure-harvest-settings)
+  - [Stop Rule options](#stop-rule-options)
 - [Preparing Input Files](#preparing-input-files)
 - [Harvest Page](#harvest-page)
   - [Run setup controls](#run-setup-controls)
-  - [Stop Rule options](#stop-rule-options)
   - [Running a harvest](#running-a-harvest)
 - [Harvest Outputs](#harvest-outputs)
   - [Successful results](#successful-results)
@@ -47,12 +47,14 @@ The application has four main pages:
 
 | Page | Purpose |
 |------|---------|
-| `Dashboard` | Run status, KPI cards, recent results, result-file buttons, linked-ISBN tools |
-| `Configure` | Profile settings and target management |
+| `Configure` | Profile settings, harvest settings, and target management |
 | `Harvest` | Input-file preview, harvest controls, and MARC import |
+| `Dashboard` | Run status, KPI cards, recent results, result-file buttons, linked-ISBN tools |
 | `Help` | Keyboard shortcuts, accessibility links, and documentation links |
 
-The app currently opens on the `Configure` page.
+The pages are listed above in sidebar order, which is the order they appear in the left navigation panel. The sidebar also contains a status pill showing the current run state, a `Toggle Theme` button, and an `Exit` button at the bottom. A collapse button in the sidebar header hides the labels to give more screen space.
+
+The app opens on the `Configure` page.
 
 ---
 
@@ -80,9 +82,9 @@ All profiles share the same SQLite database file at `data/lccn_harvester.sqlite3
 
 ### Important profile behavior
 
-- `Default Settings` is built in and read-only.
+- `Default Settings` is built in. Its harvest settings cannot be saved back over the default profile.
 - `Default Settings` uses the shared targets file at `data/targets.tsv`.
-- To keep changes, create a new profile and save there.
+- If you want a separate combination of harvest settings and targets, create a new profile first.
 - Deleting a profile removes its saved configuration files, but its existing output folder is left in place.
 
 ### Create a profile
@@ -94,7 +96,9 @@ All profiles share the same SQLite database file at `data/lccn_harvester.sqlite3
 
 ### Switch profiles
 
-Use the profile selector on the `Configure` page. Switching profiles reloads both settings and targets.
+Use the profile selector on the `Configure` page. Switching profiles reloads settings, refreshes the active targets, and resets harvest-run state tied to the previous profile while preserving the current input file when possible.
+
+If you changed harvest settings but have not clicked `Save Changes`, the app prompts you to save or discard them before switching profiles or making target-list changes that depend on the active profile.
 
 ---
 
@@ -127,8 +131,18 @@ The `Harvest Settings` card stores the profile defaults used when a run begins.
 |---------|---------|
 | `Retry Interval` | Days to wait before retrying a failed lookup |
 | `Call Number Selection` | `LCCN only`, `NLMCN only`, or `Both` |
+| `Stop Rule` | Active only when `Call Number Selection` is `Both` |
 
-When a harvest run starts from the `Harvest` page, the run controls can override parts of this configuration for that run.
+### Stop Rule options
+
+| Option | Meaning |
+|--------|---------|
+| `Stop if either found` | Stop when either an LCCN or NLMCN is found |
+| `Stop if LCCN found` | Stop once an LCCN is found |
+| `Stop if NLMCN found` | Stop once an NLMCN is found |
+| `Continue until both found` | Keep querying until both types are found or targets are exhausted |
+
+These settings apply to every run started under the active profile. The only per-run override available on the `Harvest` page is `Database only for this run`.
 
 ---
 
@@ -180,29 +194,18 @@ The `Harvest` page has three main areas:
 
 | Control | Meaning |
 |---------|---------|
+| `Active profile` | Shows the profile whose settings will be used for the run |
 | `Input file` | Select or drag in the harvest input file |
-| `Run Mode` | `LCCN Only`, `NLM Only`, `Both (LCCN & NLM)`, or `MARC Import Only` |
-| `Stop Rule` | Active only when run mode is `Both` and DB-only is off |
 | `Database only for this run` | Skip external targets and search the local database only |
 
-`MARC Import Only` sets the run to use the local database only, which is useful after seeding records through the MARC Import section.
-
-### Stop Rule options
-
-| Option | Meaning |
-|--------|---------|
-| `Stop if either found` | Stop when either an LCCN or NLMCN is found |
-| `Stop if LCCN found` | Stop once an LCCN is found |
-| `Stop if NLMCN found` | Stop once an NLMCN is found |
-| `Continue until both found` | Keep querying until both types are found or targets are exhausted |
+Call number mode and stop rule are set on the `Configure` page under `Harvest Settings` and apply to every run under the active profile.
 
 ### Running a harvest
 
 1. Open `Harvest`.
 2. Select or drag in an input file.
 3. Review the file statistics and preview.
-4. Adjust run mode if needed.
-5. Click `Start Harvest`.
+4. Click `Start Harvest`.
 
 During a run you can:
 
@@ -233,8 +236,8 @@ Columns depend on the active mode:
 | Mode | Columns |
 |------|---------|
 | `LCCN only` | `ISBN`, `LCCN`, `LCCN Source`, `Classification`, `Date` |
-| `NLMCN only` | `ISBN`, `NLM`, `NLM Source`, `Date` |
-| `Both` | `ISBN`, `LCCN`, `LCCN Source`, `Classification`, `NLM`, `NLM Source`, `Date` |
+| `NLMCN only` | `ISBN`, `NLM`, `NLM Source`, `NLM Classification`, `Date` |
+| `Both` | `ISBN`, `LCCN`, `LCCN Source`, `Classification`, `NLM`, `NLM Source`, `NLM Classification`, `Date` |
 
 ### Failed results
 
@@ -284,10 +287,11 @@ Supported file types:
 3. Enter a source name when prompted.
 4. The import uses the current call-number mode from the active configuration.
 5. Matching records are saved into the shared SQLite database.
-6. A timestamped export is written to the active profile folder:
+6. A timestamped TSV export is written to the active profile folder:
    `data/<profile-slug>/<profile>-marc-import-<timestamp>.tsv`
+7. A CSV copy of that export is also written beside it for spreadsheet use.
 
-Records with ISBNs but no call number are recorded in the database as attempted rows. Records with no usable ISBN are skipped.
+If the selected source name already has overlapping ISBNs in the database, the app prompts you to import only new rows, import all rows, or cancel. Records with ISBNs but no call number are recorded in the database as attempted rows. Records with no usable ISBN are skipped.
 
 ---
 
@@ -300,13 +304,15 @@ Main sections:
 - Run status pill
 - Pause and cancel buttons during active runs
 - KPI cards for processed, successful, failed, and invalid rows
-- Result-file buttons for the most recent run
+- Result-file buttons for the most recent run, including the profile folder and linked-ISBN export
 - Recent results list
 - `Browse Database`
 - `Linked ISBNs`
 - `Reset Dashboard Stats`
 
 `Browse Database` is a read-only viewer for the `main`, `attempted`, and `linked_isbns` tables with search, filtering, and pagination.
+
+The `Linked ISBNs` view lets you query an ISBN's canonical mapping, manually link two ISBNs, or rewrite and merge rows under the lowest ISBN.
 
 ---
 
@@ -315,7 +321,7 @@ Main sections:
 The `Help` page provides:
 
 - Keyboard shortcut reference
-- Accessibility statement link
+- Accessibility statement link to the maintained repository document
 - Support and guidance link
 - User guide link
 - App version and platform summary

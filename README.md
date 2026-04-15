@@ -8,8 +8,8 @@ It supports API and Z39.50 targets, local caching in SQLite, linked ISBN handlin
 
 ## Features
 
-- Desktop GUI with four primary pages: `Dashboard`, `Configure`, `Harvest`, and `Help`
-- Built-in API targets for Library of Congress, Harvard LibraryCloud, and OpenLibrary
+- Desktop GUI with four primary pages: `Configure`, `Harvest`, `Dashboard`, and `Help`
+- Built-in API targets for Library of Congress, Harvard Library API, and OpenLibrary
 - Configurable Z39.50 targets stored per profile
 - Shared SQLite cache with linked-ISBN support
 - Profile-specific settings and output folders
@@ -83,10 +83,10 @@ data/           GUI settings, runtime database, profile output folders
 
 MIT. See [LICENSE](LICENSE).
 
-## Contributors:
+## Contributors
 
-- Ahmed Abdelmagid: ahmedmkabdelmagid@gmail.com - www.linkedin.com/in/ahmed-abdelmagid-84007236a
+- Ahmed Abdelmagid: ahmedmkabdelmagid@gmail.com - https://www.linkedin.com/in/ahmed-abdelmagid-84007236a
 - Abdel Rahman Alashal: abd.alashel@gmail.com - https://www.linkedin.com/in/abdel-rahman-alashel-883a30271/
-- Eyad Mansour - Eyad-mansour@hotmail.com - https://www.linkedin.com/in/eyadmansour1
-- Hashem Bader - https://www.linkedin.com/in/hashem-bader-7b25092b7/
-- Karim Khalil: karimelsadek@live.com - https://www.linkedin.com/in/karim-khalil-404074242?
+- Eyad Mansour: Eyad-mansour@hotmail.com - https://www.linkedin.com/in/eyadmansour1
+- Hashem Bader: https://www.linkedin.com/in/hashem-bader-7b25092b7/
+- Karim Khalil: karimelsadek@live.com - https://www.linkedin.com/in/karim-khalil-404074242

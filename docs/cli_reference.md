@@ -21,7 +21,7 @@ The CLI:
 
 The CLI is intentionally narrower than the GUI. It does not expose profile switching, target editing, live GUI output files, or MARC import.
 
-By default it uses the shared database at `data/lccn_harvester.sqlite3` and the default API target set used by the harvest pipeline.
+By default it uses the shared database at `data/lccn_harvester.sqlite3` and the built-in API target factory used by the harvest pipeline. It does not read the GUI profile target TSV files.
 
 ---
 
@@ -82,7 +82,7 @@ Supported `--stop-rule` values:
 - `stop_nlmcn`
 - `continue_both`
 
-The CLI does not currently expose a separate `call_number_mode` flag, so the stop rule is primarily useful for the pipeline's default combined lookup behavior.
+The CLI does not currently expose a separate `call_number_mode` flag, so the stop rule applies to the pipeline's default `both` mode.
 
 ---
 
