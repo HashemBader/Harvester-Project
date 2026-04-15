@@ -17,7 +17,7 @@ It supports API and Z39.50 targets, local caching in SQLite, linked ISBN handlin
 - Per-run `Database only for this run` option
 - MARC import from binary MARC21 (`.mrc`, `.marc`) and MARCXML (`.xml`)
 - Timestamped TSV exports plus UTF-8-BOM CSV copies
-- Light and dark themes, persisted in `data/gui_settings.json`
+- Light and dark themes, with GUI settings written to `data/gui_settings.json`
 - Cross-platform source execution with Python
 
 ---
@@ -30,7 +30,7 @@ macOS / Linux:
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python app_entry.py
+python3 app_entry.py
 ```
 
 Windows PowerShell:
@@ -39,7 +39,7 @@ Windows PowerShell:
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python app_entry.py
+py .\app_entry.py
 ```
 
 ---

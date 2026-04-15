@@ -26,9 +26,8 @@ pip install -r requirements.txt
 
 Launch the GUI:
 
-```bash
-python app_entry.py
-```
+- macOS / Linux: `python3 app_entry.py`
+- Windows PowerShell: `py .\app_entry.py`
 
 Run the CLI:
 

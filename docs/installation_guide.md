@@ -19,7 +19,7 @@ macOS / Linux:
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-python app_entry.py
+python3 app_entry.py
 ```
 
 Windows PowerShell:
@@ -28,7 +28,7 @@ Windows PowerShell:
 py -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-python app_entry.py
+py .\app_entry.py
 ```
 
 This is the documented launch path that is fully represented in the `main` branch.
