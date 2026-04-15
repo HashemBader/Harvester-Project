@@ -1,4 +1,4 @@
-# LCCN Harvester — Documentation
+# LCCN Harvester: Documentation
 
 This is the documentation landing page expected by the `main` branch.
 
@@ -16,5 +16,5 @@ For a grouped overview, see [OVERVIEW.md](OVERVIEW.md). For a one-line index, se
 | [cli_reference.md](cli_reference.md) | Command-line interface reference |
 | [technical_manual.md](technical_manual.md) | Internal architecture and runtime reference |
 | [contribution_guide.md](contribution_guide.md) | Developer workflow notes |
-| [project_plan_cleanup_checklist.md](project_plan_cleanup_checklist.md) | Internal checklist for removing outdated scope from the legacy project plan |
-| [WCAG_ACCESSIBILITY.md](WCAG_ACCESSIBILITY.md) | Accessibility notes |
+| [WCAG_ACCESSIBILITY.md](WCAG_ACCESSIBILITY.md) | Accessibility notes and current coverage |
+| [WCAG_SELF_CHECK_REPORT.md](WCAG_SELF_CHECK_REPORT.md) | Internal accessibility self-check report |

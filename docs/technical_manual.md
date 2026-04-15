@@ -99,7 +99,7 @@ Key points:
 
 - The database is shared across profiles.
 - Profiles separate settings, targets, and output folders.
-- `gui_settings.json` stores theme and related GUI preferences.
+- `gui_settings.json` stores the persisted theme selection and related GUI-preference keys.
 - Output files are timestamped, so runs do not overwrite one another.
 
 ---
@@ -122,9 +122,11 @@ Key points:
 ### Notable GUI behavior
 
 - The app opens on the `Configure` page.
-- Theme selection is loaded from `ThemeManager`.
+- The sidebar shows navigation buttons in this order: `Configure`, `Harvest`, `Dashboard`, `Help`. Below those is a status pill showing the current run state. At the bottom are a `Toggle Theme` button and an `Exit` button. A collapse button in the sidebar header hides the text labels.
+- Theme selection is restored from `ThemeManager` on launch and persisted in `data/gui_settings.json`.
 - The system tray menu exposes `Show Window`, `Enable Notifications`, and `Quit`.
 - The dashboard database browser is read-only and supports search, source filtering, and pagination.
+- The Help page resolves repository-hosted documentation links, including the accessibility statement, against the current checkout when Git metadata is available.
 
 ---
 
@@ -139,7 +141,7 @@ Key points:
 
 `TargetsManager` persists the target list as TSV and ensures the built-in API targets are present.
 
-The GUI target editor is the main source of truth for target configuration. Built-in API targets and user-added Z39.50 targets are shown together in the same table.
+The built-in `Default Settings` profile is read-only for harvest-setting saves, but it still uses the shared `data/targets.tsv` target list. Built-in API targets and user-added Z39.50 targets are shown together in the same table.
 
 ---
 
@@ -221,6 +223,7 @@ Import behavior:
 - Records with ISBNs but no call numbers are written to `attempted`.
 - Records with no usable ISBN are skipped.
 - Linked ISBNs discovered during import are merged into the canonical ISBN structure.
+- If the chosen source name already has overlapping ISBNs in `main`, the GUI prompts to import only new rows, import all rows, or cancel.
 
 ---
 
@@ -241,10 +244,10 @@ Successful output columns vary by mode:
 | Mode | Columns |
 |------|---------|
 | `lccn` | `ISBN`, `LCCN`, `LCCN Source`, `Classification`, `Date` |
-| `nlmcn` | `ISBN`, `NLM`, `NLM Source`, `Date` |
-| `both` | `ISBN`, `LCCN`, `LCCN Source`, `Classification`, `NLM`, `NLM Source`, `Date` |
+| `nlmcn` | `ISBN`, `NLM`, `NLM Source`, `NLM Classification`, `Date` |
+| `both` | `ISBN`, `LCCN`, `LCCN Source`, `Classification`, `NLM`, `NLM Source`, `NLM Classification`, `Date` |
 
-The MARC import path writes a separate timestamped export file in the active profile folder.
+The MARC import path writes a separate timestamped TSV export file in the active profile folder and then generates a CSV copy beside it.
 
 ---
 
@@ -319,6 +322,14 @@ It does not execute arbitrary SQL.
 Accessibility-related notes live in:
 
 - `docs/WCAG_ACCESSIBILITY.md`
+- `docs/WCAG_SELF_CHECK_REPORT.md`
+
+Current implementation hooks that matter for accessibility include:
+
+- Accessible names and descriptions on major navigation and configuration controls
+- Application-scoped keyboard shortcuts for core navigation and harvest control
+- Help-page shortcut and accessibility-document entry points
+- Shared state-based styling for focus and run-status communication
 
 ---
 

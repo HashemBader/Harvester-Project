@@ -30,3 +30,4 @@ Use this page as the starting point for the repository documentation.
 | Document | Purpose |
 |----------|---------|
 | [WCAG_ACCESSIBILITY.md](WCAG_ACCESSIBILITY.md) | Accessibility notes and self-assessed coverage |
+| [WCAG_SELF_CHECK_REPORT.md](WCAG_SELF_CHECK_REPORT.md) | Internal self-check summary and manual follow-up items |
