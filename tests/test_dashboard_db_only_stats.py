@@ -20,7 +20,7 @@ def test_dashboard_normalises_db_only_local_catalog_misses():
         {
             "found": 2,
             "cached": 3,
-            "failed": 1,
+            "failed": 7,
             "skipped": 4,
             "invalid": 5,
             "not_in_local_catalog": 6,
