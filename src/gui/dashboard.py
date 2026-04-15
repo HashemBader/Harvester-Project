@@ -981,11 +981,9 @@ class DashboardTab(QWidget):
             summary_keys = {"found", "cached", "failed", "skipped", "invalid"}
             if summary_keys.intersection(stats):
                 successful = cls._int_stat(stats.get("found")) + cls._int_stat(stats.get("cached"))
-                failed = (
-                    cls._int_stat(stats.get("failed"))
-                    + cls._int_stat(stats.get("skipped"))
-                    + cls._int_stat(stats.get("not_in_local_catalog"))
-                )
+                # HarvestWorker._build_final_stats() already folds local-catalog
+                # misses into "failed", so avoid counting that bucket twice here.
+                failed = cls._int_stat(stats.get("failed")) + cls._int_stat(stats.get("skipped"))
                 return {
                     "processed": successful + failed,
                     "successful": successful,
