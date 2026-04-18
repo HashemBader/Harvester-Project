@@ -214,6 +214,8 @@ __marimo__/
 
 # Local app outputs
 data/exports/
+data/*/*.tsv
+docs/generated/
 
 # Build artifacts
 .pyinstaller/
