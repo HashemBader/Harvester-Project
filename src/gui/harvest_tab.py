@@ -47,10 +47,12 @@ from PyQt6.QtWidgets import (
     QHeaderView,
     QDialog,
     QCheckBox,
+    QStyle,
+    QStyleOptionButton,
 )
 from datetime import datetime, timedelta
-from PyQt6.QtCore import Qt, QTimer, QTime, pyqtSignal, QSize, QUrl
-from PyQt6.QtGui import QShortcut, QKeySequence, QColor, QBrush, QDesktopServices
+from PyQt6.QtCore import Qt, QTimer, QTime, pyqtSignal, QSize, QUrl, QPoint
+from PyQt6.QtGui import QShortcut, QKeySequence, QColor, QBrush, QDesktopServices, QPainter, QPen
 from pathlib import Path
 from enum import Enum, auto
 from itertools import islice
@@ -118,6 +120,54 @@ class UIState(Enum):
     COMPLETED = auto()  # Run finished successfully.
     ERROR = auto()      # Run ended with an unhandled exception.
     CANCELLED = auto()  # User cancelled the run mid-flight.
+
+
+class ClickableOptionBar(QFrame):
+    """Inline option bar that toggles its child control when clicked."""
+
+    clicked = pyqtSignal()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+
+class TickedCheckBox(QCheckBox):
+    """Checkbox that paints an explicit tick when checked."""
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if not self.isChecked():
+            return
+
+        option = QStyleOptionButton()
+        self.initStyleOption(option)
+        indicator_rect = self.style().subElementRect(
+            QStyle.SubElement.SE_CheckBoxIndicator,
+            option,
+            self,
+        )
+        if not indicator_rect.isValid():
+            return
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        tick_color = QColor("#e5f3ff") if self.isEnabled() else QColor("#cbd5e1")
+        pen = QPen(tick_color, 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+
+        width = indicator_rect.width()
+        height = indicator_rect.height()
+
+        p1 = indicator_rect.topLeft() + QPoint(max(2, width // 5), height // 2)
+        p2 = indicator_rect.topLeft() + QPoint(width // 2 - 1, max(2, (height * 3) // 4 - 1))
+        p3 = indicator_rect.topLeft() + QPoint(max(width // 2 + 1, (width * 4) // 5), max(2, height // 4))
+        painter.drawLine(p1, p2)
+        painter.drawLine(p2, p3)
+        painter.end()
 
 
 class HarvestTab(QWidget):
@@ -321,61 +371,71 @@ class HarvestTab(QWidget):
         self.input_card.file_dropped.connect(self.set_input_file)
         self.input_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         input_layout = QVBoxLayout(self.input_card)
-        input_layout.setContentsMargins(16, 10, 16, 10)
-        input_layout.setSpacing(6)
+        input_layout.setContentsMargins(18, 14, 18, 14)
+        input_layout.setSpacing(12)
 
-        setup_grid = QGridLayout()
-        setup_grid.setSpacing(6)
-        setup_grid.setColumnStretch(1, 1)
-
+        # Active profile — shown as an inline chip/badge for better visual weight.
         self.lbl_active_profile = QLabel("<b>Active profile: Default Settings</b>")
         self.lbl_active_profile.setProperty("class", "HelperText")
         self.lbl_active_profile.setToolTip("Runs use the active profile's Configure settings.")
         self.lbl_active_profile.setTextFormat(Qt.TextFormat.RichText)
-        setup_grid.addWidget(self.lbl_active_profile, 0, 0, 1, 2)
+        input_layout.addWidget(self.lbl_active_profile)
 
-        lbl_input = QLabel("Input file:")
+        # "Input file" label sits above the field (modern form pattern — leaves
+        # the horizontal space for the field + action buttons, and makes the
+        # column line up cleanly with the checkbox row beneath it).
+        lbl_input = QLabel("Input file")
         lbl_input.setProperty("class", "HelperText")
-        lbl_input.setAlignment(Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft)
+        input_layout.addWidget(lbl_input)
+
         self.file_path_edit = QLineEdit()
         self.file_path_edit.setPlaceholderText("No file selected… drag & drop or browse")
         self.file_path_edit.setReadOnly(True)
         self.file_path_edit.setProperty("class", "LineEdit")
+        self.file_path_edit.setMinimumHeight(42)
+
         self.btn_browse = QPushButton("Browse…")
         self.btn_browse.setProperty("class", "PrimaryButton")
         self.btn_browse.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_browse.setMinimumHeight(42)
         self.btn_browse.clicked.connect(self._browse_file)
+
         self.btn_clear_file = QPushButton("Clear")
         self.btn_clear_file.setProperty("class", "DangerButton")
         self.btn_clear_file.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_clear_file.setMinimumHeight(42)
         self.btn_clear_file.clicked.connect(self._clear_input)
         self.btn_clear_file.setVisible(False)
-        file_actions_row = QHBoxLayout()
-        file_actions_row.setSpacing(6)
-        file_actions_row.addStretch()
-        file_actions_row.addWidget(self.btn_clear_file)
-        file_actions_row.addWidget(self.btn_browse)
 
-        self.chk_db_only = QCheckBox("Database only for this run")
+        # Field + action buttons inline on the same row (standard file-picker
+        # pattern — the field stretches to fill; buttons hug the right edge).
+        file_row = QHBoxLayout()
+        file_row.setSpacing(8)
+        file_row.addWidget(self.file_path_edit, stretch=1)
+        file_row.addWidget(self.btn_clear_file)
+        file_row.addWidget(self.btn_browse)
+        input_layout.addLayout(file_row)
+
+        # DB-only toggle in a subtle inline option bar.
+        self.chk_db_only = TickedCheckBox("Database only for this run")
         self.chk_db_only.setToolTip("Skip APIs and Z39.50 targets and search only the existing SQLite database")
         self.chk_db_only.setCursor(Qt.CursorShape.PointingHandCursor)
         self.chk_db_only.setMinimumHeight(32)
-        self.db_only_row = QFrame()
+        self.chk_db_only.toggled.connect(self._sync_db_only_ui)
+        self.db_only_row = ClickableOptionBar()
         self.db_only_row.setProperty("class", "InlineOptionBar")
+        self.db_only_row.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.db_only_row.clicked.connect(self._toggle_db_only_checkbox)
         db_only_layout = QHBoxLayout(self.db_only_row)
-        db_only_layout.setContentsMargins(10, 2, 10, 2)
+        db_only_layout.setContentsMargins(12, 6, 12, 6)
         db_only_layout.setSpacing(0)
         db_only_layout.addWidget(
             self.chk_db_only,
             alignment=Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
         )
         db_only_layout.addStretch()
-        setup_grid.addWidget(lbl_input, 1, 0)
-        setup_grid.addWidget(self.file_path_edit, 1, 1)
-        setup_grid.addLayout(file_actions_row, 2, 1)
-        setup_grid.addWidget(self.db_only_row, 3, 1)
+        input_layout.addWidget(self.db_only_row)
         self._apply_db_only_checkbox_style()
-        input_layout.addLayout(setup_grid)
         input_layout.addStretch()
 
         # ── MARC Import card (bottom-left) ────────────────────────────────────
@@ -1055,6 +1115,10 @@ class HarvestTab(QWidget):
         """
         is_dark = ThemeManager().get_theme() == "dark"
         text_color = "#f9fafb" if is_dark else "#000000"
+        # Always outline the checkbox square: black on light for contrast
+        # against the near-white option bar, white on dark for the same
+        # reason against the dark surface.
+        indicator_border = "1px solid #ffffff" if is_dark else "1px solid #000000"
         style = (
             "QCheckBox {"
             "  color: " + text_color + ";"
@@ -1067,10 +1131,70 @@ class HarvestTab(QWidget):
             "QCheckBox::indicator {"
             "  width: 16px;"
             "  height: 16px;"
+            "  border: " + indicator_border + ";"
+            "  border-radius: 3px;"
             "}"
         )
         if getattr(self, "chk_db_only", None) is not None:
             self.chk_db_only.setStyleSheet(style)
+        self._sync_db_only_ui()
+
+    def _toggle_db_only_checkbox(self):
+        """Toggle the DB-only checkbox when the surrounding option bar is clicked."""
+        if getattr(self, "chk_db_only", None) is None or not self.chk_db_only.isEnabled():
+            return
+        self.chk_db_only.toggle()
+        self.chk_db_only.setFocus(Qt.FocusReason.MouseFocusReason)
+
+    def _sync_db_only_ui(self):
+        """Refresh the DB-only row styling so its checked state is obvious."""
+        if getattr(self, "chk_db_only", None) is None or getattr(self, "db_only_row", None) is None:
+            return
+
+        is_dark = ThemeManager().get_theme() == "dark"
+        checked = self.chk_db_only.isChecked()
+
+        if checked:
+            row_background = "#243b53" if is_dark else "#dbeafe"
+            row_border = "#60a5fa" if is_dark else "#3b82f6"
+            text_color = "#eff6ff" if is_dark else "#1e3a8a"
+            indicator_background = row_border
+            indicator_border = row_border
+        else:
+            row_background = "#363a4f" if is_dark else "#e2e8f0"
+            row_border = "transparent"
+            text_color = "#f9fafb" if is_dark else "#000000"
+            indicator_background = "transparent"
+            indicator_border = "#ffffff" if is_dark else "#000000"
+
+        self.db_only_row.setStyleSheet(
+            "QFrame[class=\"InlineOptionBar\"] {"
+            f"background-color: {row_background};"
+            f"border: 1px solid {row_border};"
+            "border-radius: 3px;"
+            "}"
+        )
+        self.chk_db_only.setStyleSheet(
+            "QCheckBox {"
+            f"  color: {text_color};"
+            "  background: transparent;"
+            "  font-size: 12px;"
+            "  font-weight: 600;"
+            "  spacing: 8px;"
+            "  padding: 0;"
+            "}"
+            "QCheckBox::indicator {"
+            "  width: 16px;"
+            "  height: 16px;"
+            f"  border: 1px solid {indicator_border};"
+            "  border-radius: 3px;"
+            "  background: transparent;"
+            "}"
+            "QCheckBox::indicator:checked {"
+            f"  background-color: {indicator_background};"
+            f"  border: 1px solid {indicator_border};"
+            "}"
+        )
 
     def _load_file_preview(self):
         """Populate the preview table with the first 20 valid ISBN rows from the input file.
@@ -1982,55 +2106,117 @@ class HarvestTab(QWidget):
         source_name: str,
         parsed_records: list,
     ) -> tuple[bool | None, list]:
-        """Check for ISBN overlap between the new file and existing DB records.
+        """Check for record overlap between the new file and existing DB records.
 
-        Compares ISBNs inside the new file against ISBNs already stored under
-        *source_name* in the database.  Returns a ``(replace_existing, records)``
-        tuple where *replace_existing* is ``None`` to abort, ``True`` to replace
-        the existing source, or ``False`` to insert; and *records* is the
-        (possibly filtered) list to persist.
+        A record from the new file is treated as a duplicate if *any* of its
+        ISBNs already appears in the database — in ``main`` (as a canonical
+        ISBN under any source), in ``linked_isbns`` (as a non-canonical
+        sibling), or in ``attempted`` (as a previously-tried ISBN under any
+        target). Counts are reported per-record, and filtering is done at
+        record level so records are not split across the new/duplicate
+        boundary by canonical-ISBN rewriting.
+
+        Returns a ``(replace_existing, records)`` tuple where
+        *replace_existing* is ``None`` to abort, ``True`` to replace the
+        existing source, or ``False`` to insert; *records* is the (possibly
+        filtered) list to persist.
         """
         import sqlite3 as _sqlite3
 
-        # Collect ISBNs from the new file's parsed records.
-        new_isbns: set[str] = set()
-        for r in parsed_records:
-            for isbn in r.isbns:
-                clean = isbn.replace("-", "").strip()
-                if clean:
-                    new_isbns.add(clean)
+        def _norm(s: str) -> str:
+            return (s or "").replace("-", "").replace(" ", "").strip().upper()
 
-        if not new_isbns:
+        # Build a per-record normalized ISBN set so we can classify each
+        # record (not each ISBN) as new or duplicate. Also keep the flat
+        # set of all ISBNs in the file so we can report ISBN-level counts
+        # (which is what users usually mean when they say "N new ISBNs").
+        record_isbn_sets: list[set[str]] = [
+            {_norm(isbn) for isbn in (r.isbns or ()) if _norm(isbn)}
+            for r in parsed_records
+        ]
+        if not any(record_isbn_sets):
             return False, parsed_records
+        all_new_isbns: set[str] = set().union(*record_isbn_sets)
 
-        # Query existing ISBNs stored under this source name.
+        # Query existing ISBNs across all sources and from every table that
+        # tracks ISBNs. A file may have been imported previously under a
+        # different source name, so restricting to source_name misses real
+        # duplicates. linked_isbns is included because canonical-ISBN
+        # rewriting during persist moves sibling ISBNs there.
         try:
             conn = _sqlite3.connect(db_path)
-            rows = conn.execute(
-                "SELECT DISTINCT isbn FROM main WHERE source = ?", (source_name,)
-            ).fetchall()
-            conn.close()
-            existing_isbns: set[str] = {r[0].replace("-", "").strip() for r in rows if r[0]}
+            try:
+                existing_isbns: set[str] = set()
+                for sql in (
+                    "SELECT DISTINCT isbn FROM main",
+                    "SELECT DISTINCT lowest_isbn FROM linked_isbns",
+                    "SELECT DISTINCT other_isbn FROM linked_isbns",
+                    "SELECT DISTINCT isbn FROM attempted",
+                ):
+                    try:
+                        for (value,) in conn.execute(sql).fetchall():
+                            norm = _norm(value or "")
+                            if norm:
+                                existing_isbns.add(norm)
+                    except _sqlite3.Error:
+                        # Table may not exist on older DBs; skip it.
+                        continue
+            finally:
+                conn.close()
         except Exception:
             return False, parsed_records
 
         if not existing_isbns:
             return False, parsed_records
 
-        overlap = new_isbns & existing_isbns
-        new_only = new_isbns - existing_isbns
+        # Classify each record: duplicate iff any of its ISBNs is in the DB.
+        # Record-level classification is used for filtering, because the
+        # persist path rewrites sibling ISBNs to a canonical one — so a
+        # record with even one already-in-DB ISBN is effectively a dup.
+        new_records: list = []
+        duplicate_count = 0
+        for record, isbn_set in zip(parsed_records, record_isbn_sets):
+            if isbn_set and isbn_set & existing_isbns:
+                duplicate_count += 1
+            else:
+                new_records.append(record)
 
-        if not overlap:
-            # All ISBNs from this file are new — import silently.
+        # ISBN-level counts, reported separately so users can see how many
+        # distinct ISBNs in the file are actually new vs. already present.
+        new_isbns = all_new_isbns - existing_isbns
+        overlap_isbns = all_new_isbns & existing_isbns
+        isbn_new_count = len(new_isbns)
+        isbn_overlap_count = len(overlap_isbns)
+
+        if duplicate_count == 0 and isbn_overlap_count == 0:
+            # Every record is new — import silently.
             return False, parsed_records
 
-        # Some ISBNs already exist under this source name — ask the user.
+        new_count = len(new_records)
+
         dialog = QMessageBox(self)
-        dialog.setWindowTitle("Duplicate ISBNs Found")
+        dialog.setWindowTitle("Duplicate Records Found")
         dialog.setIcon(QMessageBox.Icon.Question)
+        if new_count == 0:
+            # All records in this file are already in the database.
+            dialog.setText(
+                f"All {duplicate_count} record(s) in this file already exist in the database.\n"
+                f"({isbn_overlap_count} ISBN(s) match, {isbn_new_count} ISBN(s) new.)\n\n"
+                f"Import them anyway (may create duplicate rows under '{source_name}'), "
+                f"or cancel?"
+            )
+            all_btn = dialog.addButton("Import All", QMessageBox.ButtonRole.AcceptRole)
+            dialog.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+            dialog.setDefaultButton(all_btn)
+            dialog.exec()
+            if dialog.clickedButton() == all_btn:
+                return False, parsed_records
+            return None, parsed_records
+
         dialog.setText(
-            f"{len(overlap)} ISBN(s) from this file are already imported under '{source_name}'.\n"
-            f"{len(new_only)} ISBN(s) are new.\n\n"
+            f"{duplicate_count} record(s) in this file already exist in the database.\n"
+            f"{new_count} record(s) are new.\n"
+            f"({isbn_overlap_count} ISBN(s) match, {isbn_new_count} ISBN(s) new.)\n\n"
             f"Import only the new ones, import all records, or cancel?"
         )
         new_only_btn = dialog.addButton("Import New Only", QMessageBox.ButtonRole.AcceptRole)
@@ -2041,11 +2227,7 @@ class HarvestTab(QWidget):
 
         clicked = dialog.clickedButton()
         if clicked == new_only_btn:
-            filtered = [
-                r for r in parsed_records
-                if any(isbn.replace("-", "").strip() in new_only for isbn in r.isbns)
-            ]
-            return False, filtered
+            return False, new_records
         if clicked == all_btn:
             return False, parsed_records
         return None, parsed_records

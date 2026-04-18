@@ -189,9 +189,12 @@ def _prepare_marc_import_records(
 ) -> tuple[list[tuple[str, str | None, str | None]], list[ParsedMarcImportRecord], int, int, int]:
     """Filter and transform raw MARC tuples for DB persistence and TSV export.
 
-    Iterates over parsed MARC records, selects only the call-number fields
-    relevant to *mode* via ``_select_marc_values_for_mode``, and skips any
-    record that has no usable call number for the chosen mode.
+    Iterates over parsed MARC records and selects only the call-number fields
+    relevant to *mode* via ``_select_marc_values_for_mode``. Records missing
+    a call number for the chosen mode are still included in ``parsed_records``
+    (so ``persist_records`` can route them to the ``attempted`` table and they
+    appear in duplicate-detection counts), but are not written to the TSV
+    export, since the TSV represents the successful harvest output.
 
     Args:
         records: List of parsed MARC records from ``_parse_marc_records``.
@@ -202,10 +205,11 @@ def _prepare_marc_import_records(
         A 5-tuple of:
         - ``selected_rows``: List of ``(isbn, lccn, nlmcn)`` tuples ready for TSV output.
         - ``parsed_records``: List of ``ParsedMarcImportRecord`` objects for DB persistence.
-        - ``written``: Number of records included (had a call number for the mode).
-        - ``skipped``: Number of records excluded (no call number for the mode).
-        - ``no_isbn``: Number of records that had a call number for the mode but
-          no usable ISBN, so they are excluded from both the TSV and DB import.
+        - ``written``: Number of records included in the TSV export (had a call number for the mode).
+        - ``skipped``: Number of records without a call number for the mode — still
+          sent to the DB (routed to ``attempted``) but excluded from the TSV.
+        - ``no_isbn``: Number of records that had no usable ISBN, so they are excluded
+          from both the TSV and DB import entirely.
     """
     selected_rows: list[tuple[str, str | None, str | None]] = []
     parsed_records: list[ParsedMarcImportRecord] = []
@@ -220,15 +224,11 @@ def _prepare_marc_import_records(
         selected_nlmcn = validate_nlmcn(selected_nlmcn) if selected_nlmcn else None
 
         if normalized_mode == "nlmcn":
-            keep = bool(selected_nlmcn)
+            has_call_number = bool(selected_nlmcn)
         elif normalized_mode == "both":
-            keep = bool(selected_lccn or selected_nlmcn)
+            has_call_number = bool(selected_lccn or selected_nlmcn)
         else:
-            keep = bool(selected_lccn)
-
-        if not keep:
-            skipped += 1
-            continue
+            has_call_number = bool(selected_lccn)
 
         normalized_isbns = tuple(
             dict.fromkeys(
@@ -238,10 +238,11 @@ def _prepare_marc_import_records(
             )
         )
         if not normalized_isbns:
+            # Without an ISBN the record can't be stored in either `main`
+            # or `attempted`, so drop it entirely.
             no_isbn += 1
             continue
 
-        selected_rows.append((pick_lowest_isbn(normalized_isbns), selected_lccn, selected_nlmcn))
         parsed_records.append(
             ParsedMarcImportRecord(
                 isbns=normalized_isbns,
@@ -250,7 +251,14 @@ def _prepare_marc_import_records(
                 source=source_name,
             )
         )
-        written += 1
+
+        if has_call_number:
+            selected_rows.append((pick_lowest_isbn(normalized_isbns), selected_lccn, selected_nlmcn))
+            written += 1
+        else:
+            # Missing call number for this mode — persist_records will put
+            # it in `attempted` so it can be harvested later.
+            skipped += 1
 
     return selected_rows, parsed_records, written, skipped, no_isbn
 
